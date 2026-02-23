@@ -1,0 +1,60 @@
+[project]
+name = "gnn-syntax-bert"
+version = "0.1.0"
+description = "Transferring Syntactic Structure into Sentence Embeddings using GNNs — CS224N Project"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [
+    { name = "CS224N Project Team" },
+]
+dependencies = [
+    "torch>=2.1",
+    "transformers>=4.36",
+    "hydra-core>=1.3",
+    "omegaconf>=2.3",
+    "torch-geometric>=2.4",
+    "stanza>=1.7",
+    "scipy>=1.11",
+    "scikit-learn>=1.3",
+    "datasets>=2.14",
+    "huggingface-hub>=0.20",
+    "sentencepiece>=0.1.99",
+    "tqdm>=4.65",
+    "dacite>=1.8",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+eval = [
+    "matplotlib>=3.7",
+    "seaborn>=0.12",
+    "pandas>=2.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=7.4",
+    "ruff>=0.3",
+    "ipython>=8.0",
+    "ipdb>=0.13",
+]
+
+[tool.uv.sources]
+simcse = { path = "./SimCSE", editable = true }
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

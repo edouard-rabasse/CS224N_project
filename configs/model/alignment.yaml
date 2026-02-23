@@ -1,0 +1,10 @@
+# =============================================================================
+# Alignment Loss Configuration
+# =============================================================================
+# Controls the contrastive alignment between BERT (hB) and GNN (hG) branches.
+
+lambda_align: 0.1          # weight of alignment loss in combined objective
+mu_gnn: 0.05               # weight of GNN auxiliary loss
+align_temperature: 0.05    # temperature for NT-Xent alignment loss
+projector_dim: 256          # dimension of projection head (0 = no projection)
+stop_grad_gnn: false        # detach GNN embeddings before alignment loss

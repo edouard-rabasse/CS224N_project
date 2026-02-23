@@ -1,0 +1,32 @@
+# =============================================================================
+# Experiment: Freeze-then-Align (Two-Phase Training)
+# =============================================================================
+# Strategy:
+#   Phase 1 (warmup): Train GNN only (BERT frozen) so the GNN learns to encode
+#     syntactic structure into meaningful graph embeddings.
+#   Phase 2 (alignment): Unfreeze BERT, train jointly with alignment loss so
+#     BERT internalizes the syntactic signal from the now-competent GNN.
+#
+# Loss Phase 1: L = L_GNN   (BERT frozen, GNN learning)
+# Loss Phase 2: L = L_SimCSE + λ * L_align + μ * L_GNN
+
+experiment_name: freeze_then_align
+
+training:
+  # Phase 1: GNN warmup
+  phase1_epochs: 5
+  phase1_lr: 1.0e-3       # higher LR for GNN warmup
+  phase1_freeze_bert: true
+  # Phase 2: Joint alignment
+  phase2_epochs: 10
+  phase2_lr: 3.0e-5
+  phase2_freeze_bert: false
+  num_train_epochs: 15     # total = phase1 + phase2
+
+model:
+  gnn:
+    freeze: false
+  alignment:
+    lambda_align: 0.1
+    mu_gnn: 0.05
+    stop_grad_gnn: false

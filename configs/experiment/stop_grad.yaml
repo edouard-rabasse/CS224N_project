@@ -1,0 +1,23 @@
+# =============================================================================
+# Experiment: Stop-Gradient
+# =============================================================================
+# Strategy: The GNN branch is frozen. Alignment loss gradients only update BERT.
+# This forces BERT to learn representations that align with the (fixed) syntactic
+# structure encoded by the GNN, without the GNN adapting to BERT.
+#
+# Loss: L = L_SimCSE + λ * L_align(h_B, sg(h_G))
+# where sg() = stop-gradient (detach)
+
+experiment_name: stop_grad
+
+model:
+  gnn:
+    freeze: true
+  alignment:
+    stop_grad_gnn: true
+    lambda_align: 0.1
+    mu_gnn: 0.0          # no GNN auxiliary loss since GNN is frozen
+
+training:
+  num_train_epochs: 5
+  learning_rate: 3.0e-5

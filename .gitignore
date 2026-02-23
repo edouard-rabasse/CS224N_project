@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Data (large files)
+data/
+!data/.gitkeep
+
+# Training outputs
+outputs/
+runs/
+wandb/
+mlruns/
+
+# Model checkpoints
+*.pt
+*.ckpt
+*.bin
+!scripts/*.py
+
+# Stanza models
+stanza_resources/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Hydra outputs
+multirun/
+
+# Misc
+*.log
+.env

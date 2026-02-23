@@ -1,0 +1,22 @@
+# =============================================================================
+# Experiment: Multi-Loss (Joint Training)
+# =============================================================================
+# Strategy: Train BERT and GNN jointly from epoch 0 with all three losses.
+# This is the simplest and most direct approach.
+#
+# Loss: L = L_SimCSE + λ * L_align + μ * L_GNN
+
+experiment_name: multi_loss
+
+model:
+  gnn:
+    freeze: false
+  alignment:
+    lambda_align: 0.1
+    mu_gnn: 0.05
+    stop_grad_gnn: false
+
+training:
+  num_train_epochs: 3
+  learning_rate: 3.0e-5
+  gnn_learning_rate: 1.0e-4
