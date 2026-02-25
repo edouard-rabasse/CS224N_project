@@ -284,16 +284,18 @@ class StanzaSyntaxParser:
                 except Exception as e:
                     logger.warning(f"Failed to parse: {sent[:80]}... — {e}")
                     # Store a fallback: single node, no edges
-                    results.append({
-                        "tokens": sent.strip().split(),
-                        "edges_src": [],
-                        "edges_dst": [],
-                        "deprels": [],
-                        "pos_tags": [],
-                        "num_tokens": len(sent.strip().split()),
-                        "sentence": sent.strip(),
-                        "parse_error": str(e),
-                    })
+                    results.append(
+                        {
+                            "tokens": sent.strip().split(),
+                            "edges_src": [],
+                            "edges_dst": [],
+                            "deprels": [],
+                            "pos_tags": [],
+                            "num_tokens": len(sent.strip().split()),
+                            "sentence": sent.strip(),
+                            "parse_error": str(e),
+                        }
+                    )
 
             with open(chunk_file, "w", encoding="utf-8") as f:
                 for r in results:
@@ -315,27 +317,34 @@ class StanzaSyntaxParser:
 
 def main() -> None:
     """CLI entry point for batch parsing."""
-    parser = argparse.ArgumentParser(
-        description="Parse sentences from a text file into dependency graphs"
-    )
+    parser = argparse.ArgumentParser(description="Parse sentences from a text file into dependency graphs")
     parser.add_argument(
-        "--input", type=str, required=True,
+        "--input",
+        type=str,
+        required=True,
         help="Path to input text file (one sentence per line)",
     )
     parser.add_argument(
-        "--output", type=str, required=True,
+        "--output",
+        type=str,
+        required=True,
         help="Output directory for parsed graph chunks",
     )
     parser.add_argument(
-        "--chunk-size", type=int, default=10_000,
+        "--chunk-size",
+        type=int,
+        default=10_000,
         help="Sentences per chunk file (default: 10000)",
     )
     parser.add_argument(
-        "--max-sentences", type=int, default=None,
+        "--max-sentences",
+        type=int,
+        default=None,
         help="Maximum number of sentences to parse (default: all)",
     )
     parser.add_argument(
-        "--gpu", action="store_true",
+        "--gpu",
+        action="store_true",
         help="Use GPU for Stanza parsing",
     )
     args = parser.parse_args()

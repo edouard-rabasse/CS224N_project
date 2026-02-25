@@ -34,10 +34,10 @@ from src.models.gnn_encoder import SyntaxGNNEncoder
 class SyntaxBertOutput:
     """Output of the SyntaxBertModel forward pass."""
 
-    h_bert: Tensor                        # (batch_size, hidden_dim) — BERT sentence embedding
-    h_gnn: Optional[Tensor] = None        # (batch_size, hidden_dim) — GNN graph embedding
+    h_bert: Tensor  # (batch_size, hidden_dim) — BERT sentence embedding
+    h_gnn: Optional[Tensor] = None  # (batch_size, hidden_dim) — GNN graph embedding
     h_bert_proj: Optional[Tensor] = None  # (batch_size, proj_dim)  — projected BERT embedding
-    h_gnn_proj: Optional[Tensor] = None   # (batch_size, proj_dim)  — projected GNN embedding
+    h_gnn_proj: Optional[Tensor] = None  # (batch_size, proj_dim)  — projected GNN embedding
     bert_hidden_states: Optional[Tensor] = None  # (batch_size, seq_len, hidden_dim)
     simcse_loss: Optional[Tensor] = None  # scalar — SimCSE contrastive loss from BertForCL
 
@@ -190,9 +190,7 @@ class SyntaxBertModel(nn.Module):
         # ---- GNN branch ----
         # Populate GNN node features from BERT hidden states
         # We use the first sentence in each SimCSE pair (the original, not the augmented)
-        h_gnn = self._compute_gnn_embeddings(
-            last_hidden, graph_batch, token_to_word_maps
-        )
+        h_gnn = self._compute_gnn_embeddings(last_hidden, graph_batch, token_to_word_maps)
 
         # Stop-gradient on GNN branch if configured
         if self.stop_grad_gnn:
@@ -236,8 +234,10 @@ class SyntaxBertModel(nn.Module):
                 sent_hidden = bert_hidden[i]  # (seq_len, hidden_dim)
                 num_words = max(word_map) + 1 if word_map else 0
                 word_feats = torch.zeros(
-                    num_words, sent_hidden.size(-1),
-                    device=sent_hidden.device, dtype=sent_hidden.dtype,
+                    num_words,
+                    sent_hidden.size(-1),
+                    device=sent_hidden.device,
+                    dtype=sent_hidden.dtype,
                 )
                 word_counts = torch.zeros(num_words, device=sent_hidden.device)
 

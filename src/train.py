@@ -158,7 +158,9 @@ def load_parsed_graphs(parsed_dir: str) -> list[dict]:
     parsed_path = Path(parsed_dir)
     if not parsed_path.exists():
         logger.warning(f"Parsed graphs directory not found: {parsed_dir}")
-        logger.warning("Run: uv run python -m src.processing.syntax_parser --input data/wiki1m_for_simcse.txt --output data/parsed_graphs/")
+        logger.warning(
+            "Run: uv run python -m src.processing.syntax_parser --input data/wiki1m_for_simcse.txt --output data/parsed_graphs/"
+        )
         return []
 
     graphs = []
@@ -187,6 +189,7 @@ def parse_to_pyg_data(parse_result: dict) -> Data:
         PyG Data with edge_index and num_nodes.
     """
     from src.processing.syntax_parser import StanzaSyntaxParser
+
     return StanzaSyntaxParser.to_pyg_data(parse_result)
 
 
@@ -227,11 +230,18 @@ class SyntaxCLTrainer:
         self.parsed_graphs = parsed_graphs
 
         # Extract GNN and alignment configs
-        self.gnn_cfg = OmegaConf.to_container(cfg.model.gnn, resolve=True) if "model" in cfg and "gnn" in cfg.model else {}
-        self.align_cfg = OmegaConf.to_container(cfg.model.alignment, resolve=True) if "model" in cfg and "alignment" in cfg.model else {}
+        self.gnn_cfg = (
+            OmegaConf.to_container(cfg.model.gnn, resolve=True) if "model" in cfg and "gnn" in cfg.model else {}
+        )
+        self.align_cfg = (
+            OmegaConf.to_container(cfg.model.alignment, resolve=True)
+            if "model" in cfg and "alignment" in cfg.model
+            else {}
+        )
 
         # Combined loss
         from src.alignment.losses import CombinedLoss
+
         self.combined_loss = CombinedLoss(
             lambda_align=self.align_cfg.get("lambda_align", 0.1),
             mu_gnn=self.align_cfg.get("mu_gnn", 0.05),
@@ -346,11 +356,13 @@ class SyntaxCLTrainer:
             else:
                 other_params.append(param)
 
-        optimizer = torch.optim.AdamW([
-            {"params": bert_params, "lr": bert_lr, "weight_decay": weight_decay},
-            {"params": gnn_params, "lr": gnn_lr, "weight_decay": weight_decay},
-            {"params": other_params, "lr": bert_lr, "weight_decay": weight_decay},
-        ])
+        optimizer = torch.optim.AdamW(
+            [
+                {"params": bert_params, "lr": bert_lr, "weight_decay": weight_decay},
+                {"params": gnn_params, "lr": gnn_lr, "weight_decay": weight_decay},
+                {"params": other_params, "lr": bert_lr, "weight_decay": weight_decay},
+            ]
+        )
 
         logger.info(f"Optimizer: AdamW")
         logger.info(f"  BERT params: {len(bert_params)} tensors, lr={bert_lr}")
@@ -403,7 +415,9 @@ def parse_cli_args() -> tuple[str, list[str]]:
         # Allow unknown args to be passed as Hydra overrides
     )
     parser.add_argument(
-        "--config-name", type=str, default="config",
+        "--config-name",
+        type=str,
+        default="config",
         help="Hydra config name (default: config)",
     )
     args, overrides = parser.parse_known_args()
@@ -430,15 +444,18 @@ def main() -> None:
 
     # Load tokenizer
     from transformers import AutoTokenizer
+
     tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path)
     logger.info(f"Tokenizer: {model_args.model_name_or_path}")
 
     # Load BERT model (SimCSE's BertForCL)
     from transformers import AutoConfig
+
     config = AutoConfig.from_pretrained(model_args.model_name_or_path)
 
     try:
         from simcse.models import BertForCL
+
         bert_model = BertForCL.from_pretrained(
             model_args.model_name_or_path,
             config=config,
@@ -449,6 +466,7 @@ def main() -> None:
         logger.warning("SimCSE not installed. Run: bash scripts/setup_env.sh")
         logger.warning("Falling back to standard BERT for testing...")
         from transformers import BertModel
+
         bert_model = BertModel.from_pretrained(model_args.model_name_or_path)
 
     # Build SyntaxBertModel wrapper
@@ -456,6 +474,7 @@ def main() -> None:
     align_cfg = OmegaConf.to_container(cfg.model.alignment, resolve=True)
 
     from src.models.wrapper import SyntaxBertModel
+
     model = SyntaxBertModel(
         bert_model=bert_model,
         gnn_config=gnn_cfg,
@@ -463,7 +482,9 @@ def main() -> None:
     )
     logger.info(f"SyntaxBertModel initialized")
     logger.info(f"  GNN: {gnn_cfg['conv_type'].upper()}, {gnn_cfg['num_layers']} layers, pooling={gnn_cfg['pooling']}")
-    logger.info(f"  Alignment: λ={align_cfg['lambda_align']}, μ={align_cfg['mu_gnn']}, τ={align_cfg['align_temperature']}")
+    logger.info(
+        f"  Alignment: λ={align_cfg['lambda_align']}, μ={align_cfg['mu_gnn']}, τ={align_cfg['align_temperature']}"
+    )
 
     # Count parameters
     total_params = sum(p.numel() for p in model.parameters())
