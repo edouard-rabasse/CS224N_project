@@ -1,3 +1,4 @@
 [submodule "SimCSE"]
 	path = SimCSE
-	url = https://github.com/princeton-nlp/SimCSE.git
+	url = https://github.com/edouard-rabasse/SimCSE
+	# Forked from https://github.com/princeton-nlp/SimCSE

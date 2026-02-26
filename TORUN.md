@@ -93,7 +93,7 @@ uv run python scripts/run_baselines.py \
 uv run python scripts/run_baselines.py \
     --mode test \
     --task-set full \
-    --our-model outputs/partial_freeze/bert_inference \
+    --our-model outputs/default/checkpoint-20391/bert_inference \
     --output-json outputs/comparison_full.json
 ```
 
