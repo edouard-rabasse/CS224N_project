@@ -16,9 +16,9 @@
 - [x] **GNN augmented view for L_GNN**: Edge dropout augmentation implemented in
       `SyntaxGraphCollator` (controlled by `edge_drop_rate`); second PyG Batch
       returned as `graph_batch_aug`.
-- [ ] **Logging**: Add per-component loss logging (SimCSE, alignment, GNN) to
-      TensorBoard/WandB. (`_last_loss_components` is stored in the trainer but
-      not yet wired to a logging backend.)
+- [x] **Logging**: Per-component loss logging wired via `SyntaxCLTrainer.log()`
+      override. `loss_simcse`, `loss_alignment`, `loss_gnn` are running-averaged
+      over `logging_steps` and injected into every TensorBoard/WandB log event.
 
 ### `src/models/wrapper.py` — BertForCL Integration
 
@@ -29,18 +29,20 @@
 
 ## Evaluation
 
-- [ ] **STS Evaluation Integration**: Adapt SimCSE's `evaluation.py` to work with
-      `SyntaxBertModel` — needs to load the wrapper but only use the BERT branch
-      (`encode_sentences()`).
+- [x] **STS Evaluation Integration**: `src/evaluate.py` — SentEval wrapper around
+      `SyntaxBertModel.encode_sentences()`. Supports dev/test/fasttest modes,
+      STS + transfer task sets, JSON score export, and a `--baseline` flag for
+      plain HuggingFace models.
 - [ ] **Probing Tasks**: Implement syntactic probing benchmarks to measure whether
       BERT has actually internalized syntactic structure (tree depth prediction,
       top constituent classification, etc.).
-- [ ] **Ablation Configs**: Create Hydra configs for key ablations:
-  - GCN vs GAT
-  - Number of GNN layers (1, 2, 3)
-  - λ and μ sweep
-  - With/without projection head
-  - Pooling strategy comparison
+- [x] **Ablation Configs**: Created under `configs/experiment/ablation/`:
+  - `gcn.yaml` — GCN vs GAT
+  - `gnn_1layer.yaml`, `gnn_3layer.yaml` — depth sweep
+  - `lambda_low.yaml`, `lambda_high.yaml` — λ sweep (0.01, 0.5)
+  - `mu_zero.yaml`, `mu_high.yaml` — μ sweep (0.0, 0.2)
+  - `no_projection.yaml` — disable projection heads
+  - `max_pooling.yaml`, `cls_pooling.yaml` — pooling strategy comparison
 
 ## Data Pipeline
 
@@ -56,10 +58,13 @@
 
 - [ ] **Multi-GPU / DDP**: Ensure PyG batch tensors are properly handled under
       `DistributedDataParallel`. PyG's `DataLoader` has its own distributed sampler.
-- [ ] **Checkpointing**: Save/load both BERT and GNN parameters. For inference
-      checkpoints, save only BERT weights.
-- [ ] **Experiment tracking**: Wire `_last_loss_components` in `SyntaxCLTrainer` to
-      WandB or MLflow for tracking experiments across strategies.
+- [x] **Checkpointing**: `SyntaxBertModel.save_checkpoint()` saves `bert_weights/`,
+      `gnn_state.pt`, and `model_config.json`. `save_bert_only()` writes a lean
+      inference checkpoint. `from_checkpoint()` restores both branches.
+      `SyntaxCLTrainer._save_checkpoint()` and `save_model()` call these
+      automatically at every HF checkpoint interval and at training end.
+- [x] **Experiment tracking**: `_last_loss_components` averaged via running sums
+      and injected into TensorBoard/WandB through `SyntaxCLTrainer.log()` override.
 
 ## Testing
 

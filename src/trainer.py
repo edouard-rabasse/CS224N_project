@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
 import torch
 from omegaconf import DictConfig, OmegaConf
@@ -153,6 +154,10 @@ class SyntaxCLTrainer(Trainer):
             callbacks=callbacks if callbacks else None,
         )
 
+        # Running sums for per-component loss logging (reset each logging interval)
+        self._loss_sums: dict[str, float] = {}
+        self._loss_count: int = 0
+
     # ------------------------------------------------------------------
     # compute_loss
     # ------------------------------------------------------------------
@@ -231,12 +236,16 @@ class SyntaxCLTrainer(Trainer):
             h_gnn_aug=h_gnn_aug,
         )
 
-        # Store components for optional logging
-        self._last_loss_components = {
+        # Accumulate per-component losses for averaged logging
+        components = {
             "loss_simcse": losses["simcse"].item(),
             "loss_alignment": losses["alignment"].item(),
             "loss_gnn": losses["gnn"].item(),
         }
+        self._last_loss_components = components
+        for k, v in components.items():
+            self._loss_sums[k] = self._loss_sums.get(k, 0.0) + v
+        self._loss_count += 1
 
         return (losses["total"], output) if return_outputs else losses["total"]
 
@@ -295,6 +304,88 @@ class SyntaxCLTrainer(Trainer):
         )
         self.optimizer = optimizer
         return optimizer
+
+    # ------------------------------------------------------------------
+    # _save_checkpoint — persist BERT + GNN weights
+    # ------------------------------------------------------------------
+
+    def _save_checkpoint(self, model: torch.nn.Module, trial, **kwargs) -> None:
+        """Override HF Trainer checkpoint saving to persist both branches.
+
+        In addition to the standard HF checkpoint (optimizer, scheduler, RNG
+        state), this writes:
+          - ``bert_weights/``   — HuggingFace-format BERT weights
+          - ``gnn_state.pt``    — GNN + projection-head weights
+          - ``model_config.json`` — hyper-parameters for reconstruction
+
+        At the end of training, ``save_bert_only()`` produces a lean
+        ``bert_inference/`` directory containing only BERT weights for
+        deployment without any GNN dependency.
+
+        Args:
+            model: The ``SyntaxBertModel`` being trained.
+            trial: Optuna trial (passed through from HF Trainer, may be None).
+            **kwargs: Forwarded to super (signature varies across transformers versions).
+        """
+        # Let HF Trainer handle optimizer / scheduler / RNG / tokenizer state
+        super()._save_checkpoint(model, trial, **kwargs)
+
+        # Write BERT + GNN weights alongside the HF checkpoint
+        checkpoint_folder = f"checkpoint-{self.state.global_step}"
+        output_dir = Path(self.args.output_dir) / checkpoint_folder
+        if hasattr(model, "save_checkpoint"):
+            model.save_checkpoint(str(output_dir))  # type: ignore[union-attr]
+            logger.info(f"[SyntaxCLTrainer] Saved BERT+GNN checkpoint → {output_dir}")
+
+    def save_model(self, output_dir: str | None = None, _internal_call: bool = False) -> None:
+        """Save the final model after training completes.
+
+        Writes both the full ``SyntaxBertModel`` checkpoint and a lightweight
+        BERT-only inference checkpoint under ``<output_dir>/bert_inference/``.
+
+        Args:
+            output_dir: Destination directory. Defaults to ``args.output_dir``.
+            _internal_call: Internal HF Trainer flag (forwarded to super).
+        """
+        out = output_dir or self.args.output_dir
+        super().save_model(out, _internal_call=_internal_call)
+
+        model = self.model
+        if hasattr(model, "save_checkpoint"):
+            model.save_checkpoint(out)  # type: ignore[union-attr]
+            logger.info(f"[SyntaxCLTrainer] Full checkpoint saved → {out}")
+
+        if hasattr(model, "save_bert_only"):
+            bert_inference_dir = str(Path(out) / "bert_inference")
+            model.save_bert_only(bert_inference_dir)  # type: ignore[union-attr]
+            logger.info(
+                f"[SyntaxCLTrainer] BERT-only inference checkpoint saved → {bert_inference_dir}"
+            )
+
+    # ------------------------------------------------------------------
+    # log — inject per-component loss averages into metrics
+    # ------------------------------------------------------------------
+
+    def log(self, logs: dict[str, float], start_time: float | None = None, **kwargs: Any) -> None:
+        """Override Trainer.log to add averaged per-component loss metrics.
+
+        Injects ``loss_simcse``, ``loss_alignment``, and ``loss_gnn`` into every
+        log event, then resets the running accumulators.
+
+        Args:
+            logs: Metric dict assembled by HuggingFace Trainer.
+            start_time: Passed positionally by transformers ≥4.46.
+            **kwargs: Extra keyword args forwarded to the super.
+        """
+        if self._loss_count > 0:
+            for k, v in self._loss_sums.items():
+                logs[k] = round(v / self._loss_count, 6)
+            self._loss_sums = {}
+            self._loss_count = 0
+        if start_time is not None:
+            super().log(logs, start_time, **kwargs)
+        else:
+            super().log(logs, **kwargs)
 
     # ------------------------------------------------------------------
     # Helpers

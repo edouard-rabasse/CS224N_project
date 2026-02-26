@@ -22,7 +22,9 @@ Key design choices:
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 import torch
@@ -359,3 +361,136 @@ class SyntaxBertModel(nn.Module):
             **kwargs,
         )
         return output.h_bert
+
+    # ------------------------------------------------------------------
+    # Checkpointing
+    # ------------------------------------------------------------------
+
+    def save_checkpoint(self, output_dir: str) -> None:
+        """Save both BERT and GNN weights to ``output_dir``.
+
+        Saves:
+          - ``bert_weights/``          — HuggingFace-format BERT weights
+            (loadable with ``AutoModel.from_pretrained``)
+          - ``gnn_state.pt``           — raw GNN + projection-head state dict
+          - ``model_config.json``      — GNN / alignment hyper-parameters
+
+        Args:
+            output_dir: Directory to write the checkpoint into (created if absent).
+        """
+        out = Path(output_dir)
+        out.mkdir(parents=True, exist_ok=True)
+
+        # BERT branch: save in HuggingFace format so it can be loaded standalone
+        bert_dir = out / "bert_weights"
+        if hasattr(self.bert, "save_pretrained"):
+            getattr(self.bert, "save_pretrained")(str(bert_dir))
+        else:
+            bert_dir.mkdir(parents=True, exist_ok=True)
+            torch.save(self.bert.state_dict(), bert_dir / "pytorch_model.bin")
+
+        # GNN + projection heads: save as a plain state dict
+        gnn_state: dict = {"gnn": self.gnn.state_dict()}
+        if self.bert_projector is not None:
+            gnn_state["bert_projector"] = self.bert_projector.state_dict()
+        if self.gnn_projector is not None:
+            gnn_state["gnn_projector"] = self.gnn_projector.state_dict()
+        torch.save(gnn_state, out / "gnn_state.pt")
+
+        # Store GNN / alignment hyper-parameters for reconstruction
+        cfg = {
+            "hidden_dim": self.hidden_dim,
+            "stop_grad_gnn": self.stop_grad_gnn,
+            "freeze_gnn": self.freeze_gnn,
+            "has_bert_projector": self.bert_projector is not None,
+            "has_gnn_projector": self.gnn_projector is not None,
+        }
+        with open(out / "model_config.json", "w") as f:
+            json.dump(cfg, f, indent=2)
+
+    def save_bert_only(self, output_dir: str) -> None:
+        """Save only the BERT branch in HuggingFace format.
+
+        Use this to produce an inference checkpoint that is directly
+        loadable as a standard sentence embedding model — no GNN code needed.
+
+        Args:
+            output_dir: Destination directory (created if absent).
+        """
+        out = Path(output_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        if hasattr(self.bert, "save_pretrained"):
+            getattr(self.bert, "save_pretrained")(str(out))
+        else:
+            torch.save(self.bert.state_dict(), out / "pytorch_model.bin")
+
+    @classmethod
+    def from_checkpoint(
+        cls,
+        checkpoint_dir: str,
+        device: Optional[torch.device] = None,
+    ) -> "SyntaxBertModel":
+        """Load a SyntaxBertModel from a checkpoint saved by ``save_checkpoint``.
+
+        Reconstructs both BERT and GNN branches. Requires ``bert_weights/``,
+        ``gnn_state.pt``, and ``model_config.json`` to be present.
+
+        Args:
+            checkpoint_dir: Directory produced by ``save_checkpoint``.
+            device: Target device. Defaults to CPU.
+
+        Returns:
+            Fully restored ``SyntaxBertModel`` in eval mode.
+        """
+        from transformers import BertModel
+
+        ckpt = Path(checkpoint_dir)
+        cfg_path = ckpt / "model_config.json"
+        gnn_path = ckpt / "gnn_state.pt"
+        bert_dir = ckpt / "bert_weights"
+
+        with open(cfg_path) as f:
+            saved_cfg: dict = json.load(f)
+
+        hidden_dim: int = saved_cfg["hidden_dim"]
+
+        # Reconstruct BERT
+        if bert_dir.exists():
+            bert_model = BertModel.from_pretrained(str(bert_dir))
+        else:
+            raise FileNotFoundError(f"bert_weights/ not found in {ckpt}")
+
+        # Reconstruct GNN config from saved hidden dim
+        gnn_config: dict = {
+            "conv_type": "gat",       # defaults — overridden by loaded weights
+            "num_layers": 2,
+            "hidden_dim": hidden_dim,
+            "heads": 4,
+            "dropout": 0.1,
+            "pooling": "mean",
+        }
+        proj_dim = hidden_dim // 3 if saved_cfg.get("has_bert_projector", False) else 0
+        alignment_config: dict = {
+            "projector_dim": proj_dim,
+            "stop_grad_gnn": saved_cfg.get("stop_grad_gnn", False),
+        }
+
+        model = cls(
+            bert_model=bert_model,
+            gnn_config=gnn_config,
+            alignment_config=alignment_config,
+        )
+
+        # Restore GNN + projector weights
+        if gnn_path.exists():
+            gnn_state = torch.load(gnn_path, map_location="cpu", weights_only=True)
+            model.gnn.load_state_dict(gnn_state["gnn"])
+            if "bert_projector" in gnn_state and model.bert_projector is not None:
+                model.bert_projector.load_state_dict(gnn_state["bert_projector"])
+            if "gnn_projector" in gnn_state and model.gnn_projector is not None:
+                model.gnn_projector.load_state_dict(gnn_state["gnn_projector"])
+
+        model.eval()
+        if device is not None:
+            model = model.to(device)
+        return model

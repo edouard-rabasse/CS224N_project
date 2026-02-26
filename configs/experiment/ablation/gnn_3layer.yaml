@@ -1,0 +1,24 @@
+# =============================================================================
+# Ablation: GNN depth — 3 layers
+# =============================================================================
+# Tests whether deeper propagation (3-hop neighbourhoods) captures richer
+# long-range syntactic structure beyond the default 2-layer model.
+#
+# Usage:  uv run python src/train.py experiment=ablation/gnn_3layer
+
+experiment_name: ablation_gnn_3layer
+
+model:
+  gnn:
+    conv_type: gat
+    num_layers: 3
+    freeze: false
+  alignment:
+    lambda_align: 0.1
+    mu_gnn: 0.05
+    stop_grad_gnn: false
+
+training:
+  num_train_epochs: 3
+  learning_rate: 3.0e-5
+  gnn_learning_rate: 1.0e-4

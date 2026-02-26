@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(UV_PROJECT_ENVIRONMENT=\"C:\\\\Users\\\\rabas\\\\python_envs\\\\CS224N_project\" uv run python src/train.py --config-name config training.max_seq_length=64 data.max_train_samples=200 training.num_train_epochs=1 training.per_device_train_batch_size=8 training.dataloader_num_workers=0 training.logging_steps=1)"
+      "Bash(UV_PROJECT_ENVIRONMENT=\"C:\\\\Users\\\\rabas\\\\python_envs\\\\CS224N_project\" uv run python src/train.py --config-name config training.max_seq_length=64 data.max_train_samples=200 training.num_train_epochs=1 training.per_device_train_batch_size=8 training.dataloader_num_workers=0 training.logging_steps=1)",
+      "Read(//c/Users/rabas/python_envs/CS224N_project/lib/site-packages/transformers/**)"
     ]
   }
 }

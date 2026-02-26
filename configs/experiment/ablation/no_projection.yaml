@@ -1,0 +1,24 @@
+# =============================================================================
+# Ablation: No projection head (projector_dim = 0)
+# =============================================================================
+# Removes the MLP projection heads from both BERT and GNN branches.
+# The alignment contrastive loss is computed directly in the raw representation
+# space. Tests whether projection is necessary to prevent representation collapse.
+#
+# Usage:  uv run python src/train.py experiment=ablation/no_projection
+
+experiment_name: ablation_no_projection
+
+model:
+  gnn:
+    freeze: false
+  alignment:
+    lambda_align: 0.1
+    mu_gnn: 0.05
+    stop_grad_gnn: false
+    projector_dim: 0        # disables ProjectionHead in SyntaxBertModel
+
+training:
+  num_train_epochs: 3
+  learning_rate: 3.0e-5
+  gnn_learning_rate: 1.0e-4
