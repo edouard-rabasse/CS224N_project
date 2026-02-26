@@ -221,7 +221,7 @@ def run_debug_training(
 ) -> None:
     """Run a quick debug training loop on GPU with toy data."""
 
-    device = torch.device("cuda")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info("=" * 60)
     logger.info("  GNN-Syntax-BERT — Debug Training Script")
     logger.info("=" * 60)
@@ -326,10 +326,15 @@ def run_debug_training(
             max_length=max_seq_length,
             return_tensors="pt",
         )
-        input_ids = encoded["input_ids"].to(device)
+        input_ids = encoded["input_ids"].to(device)       # (bs, seq_len)
         attention_mask = encoded["attention_mask"].to(device)
 
-        # Convert BERT tokens back to strings for alignment
+        # SimCSE format: (bs, 2, seq_len) — same input repeated so that BERT's
+        # dropout mask creates two distinct views z1, z2 for NT-Xent loss.
+        input_ids_2x = torch.stack([input_ids, input_ids], dim=1)
+        attention_mask_2x = torch.stack([attention_mask, attention_mask], dim=1)
+
+        # Convert BERT tokens back to strings for subword→word alignment
         bert_token_strs = [tokenizer.convert_ids_to_tokens(ids) for ids in input_ids]
 
         # Build subword→word alignment maps
@@ -346,22 +351,24 @@ def run_debug_training(
         optimizer.zero_grad()
 
         output = model(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
+            input_ids=input_ids_2x,
+            attention_mask=attention_mask_2x,
             graph_batch=graph_batch,
             token_to_word_maps=token_to_word_maps,
         )
 
-        # Proxy SimCSE loss (since we don't have the full SimCSE cl_forward here,
-        # we simulate it as cosine similarity of h_B with a shifted version)
-        h_B = output.h_bert
-        h_B_shifted = torch.roll(h_B, 1, dims=0)
-        sim = F.cosine_similarity(h_B, h_B_shifted, dim=-1)
-        loss_simcse_proxy = -sim.mean() + 1.0  # crude proxy, always positive
+        # SimCSE NT-Xent loss is now computed inside wrapper.forward().
+        # Fall back to a proxy if unavailable (e.g. single-view input).
+        if output.simcse_loss is not None:
+            loss_simcse = output.simcse_loss
+        else:
+            h_B = output.h_bert
+            sim = F.cosine_similarity(h_B, torch.roll(h_B, 1, dims=0), dim=-1)
+            loss_simcse = -sim.mean() + 1.0  # crude proxy, always positive
 
         # Combined loss
         losses = combined_loss(
-            loss_simcse=loss_simcse_proxy,
+            loss_simcse=loss_simcse,
             h_bert=output.h_bert,
             h_gnn=output.h_gnn,
             h_bert_proj=output.h_bert_proj,

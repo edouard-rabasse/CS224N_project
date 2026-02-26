@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run python -c \"import inspect, transformers; args = inspect.signature\\(transformers.TrainingArguments.__init__\\).parameters; print\\(''\\\\n''.join\\(args.keys\\(\\)\\)\\)\")",
+      "Bash(UV_PROJECT_ENVIRONMENT=\"C:\\\\Users\\\\rabas\\\\python_envs\\\\CS224N_project\" uv run python scripts/debug_train.py --steps 3)"
+    ]
+  }
+}

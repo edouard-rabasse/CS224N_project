@@ -8,9 +8,9 @@
 #   uv run python src/train.py --config-name config model/gnn=gnn gnn.conv_type=gcn
 
 defaults:
-  - model/bert: bert
-  - model/gnn: gnn
-  - model/alignment: alignment
+  - model@model.bert: bert
+  - model@model.gnn: gnn
+  - model@model.alignment: alignment
   - experiment: multi_loss
   - _self_
 
@@ -23,7 +23,7 @@ training:
   learning_rate: 3.0e-5
   gnn_learning_rate: 1.0e-4     # separate LR for GNN branch
   max_seq_length: 32
-  warmup_ratio: 0.06
+  warmup_steps: 0
   weight_decay: 0.0
   fp16: true
   output_dir: outputs/${experiment_name}
