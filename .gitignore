@@ -19,6 +19,7 @@ data
 !src/data
 
 # Training outputs
+output
 outputs
 runs/
 wandb/

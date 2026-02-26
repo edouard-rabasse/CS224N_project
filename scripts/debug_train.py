@@ -450,6 +450,13 @@ def run_debug_training(
     logger.info("  All checks passed! Pipeline is functional.")
     logger.info("=" * 60)
 
+    # ---- Save BERT checkpoint for evaluation ----
+    save_dir = PROJECT_ROOT / "output" / "debug_model"
+    save_dir.mkdir(parents=True, exist_ok=True)
+    bert_model.save_pretrained(str(save_dir))
+    tokenizer.save_pretrained(str(save_dir))
+    logger.info(f"  BERT checkpoint saved → {save_dir}")
+
 
 # =============================================================================
 # Debug BERT wrapper (mimics SimCSE's BertForCL interface)
