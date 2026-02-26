@@ -113,14 +113,34 @@ uv run python src/train.py --config-name config \
     model.alignment.lambda_align=0.2
 ```
 
-### 5. Evaluate
+### 5. Download SentEval Data
+
+SentEval evaluation datasets are not included in the repo and must be downloaded separately:
 
 ```bash
-# Evaluate on STS benchmarks (uses SimCSE's evaluation)
-uv run python SimCSE/evaluation.py \
+bash scripts/download_senteval_data.sh
+```
+
+This downloads all STS and transfer task datasets (STS12-16, STSBenchmark, SICKRelatedness, MR, CR, MPQA, SUBJ, SST2, TREC, MRPC) into `SimCSE/SentEval/data/downstream/`.
+
+> **Note**: Requires the SimCSE submodule to be initialized first (`git submodule update --init --recursive`).
+
+### 6. Evaluate
+
+```bash
+# Evaluate on STS benchmarks (dev mode, fast)
+uv run python -m src.evaluation \
     --model_name_or_path outputs/multi_loss/ \
     --pooler cls_before_pooler \
+    --mode dev \
     --task_set sts
+
+# Full test evaluation
+uv run python -m src.evaluation \
+    --model_name_or_path outputs/multi_loss/ \
+    --pooler cls_before_pooler \
+    --mode test \
+    --task_set full
 ```
 
 ## Project Structure
