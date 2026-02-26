@@ -56,6 +56,10 @@ class AlignmentLoss(nn.Module):
         Returns:
             Scalar loss value.
         """
+        # Ensure matching dtypes (mixed-precision may produce fp16 vs fp32)
+        if h_bert.dtype != h_gnn.dtype:
+            h_bert = h_bert.float()
+            h_gnn = h_gnn.float()
         # L2-normalize embeddings
         h_bert = F.normalize(h_bert, p=2, dim=-1)
         h_gnn = F.normalize(h_gnn, p=2, dim=-1)
@@ -111,6 +115,10 @@ class GNNContrastiveLoss(nn.Module):
         Returns:
             Scalar loss value.
         """
+        # Ensure matching dtypes (mixed-precision may produce fp16 vs fp32)
+        if h_gnn_1.dtype != h_gnn_2.dtype:
+            h_gnn_1 = h_gnn_1.float()
+            h_gnn_2 = h_gnn_2.float()
         h_gnn_1 = F.normalize(h_gnn_1, p=2, dim=-1)
         h_gnn_2 = F.normalize(h_gnn_2, p=2, dim=-1)
 
