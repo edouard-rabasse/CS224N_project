@@ -35,31 +35,46 @@ uv run python src/train.py experiment=stop_grad
 
 # Stratégie 3 : freeze-then-align (warmup GNN puis joint)
 uv run python src/train.py experiment=freeze_then_align
+
+# Stratégie 4 : partial freeze — 6 premières couches BERT gelées, 6 dernières entraînables
+# ~42M paramètres entraînables (couches 6–11 + pooler + MLP head + GNN)
+uv run python src/train.py experiment=partial_freeze
 ```
 
 Les checkpoints sont sauvegardés dans :
 - `outputs/multi_loss/`
 - `outputs/stop_grad/`
 - `outputs/freeze_then_align/`
+- `outputs/partial_freeze/`
 
 ---
 
 ## 2. Évaluation de notre modèle
 
+> **Note** : toujours pointer vers `<experiment>/bert_inference/` — c'est le BERT seul,
+> sans le GNN, chargeable directement avec `AutoModel.from_pretrained`.
+
 ```bash
-# Évaluer le meilleur checkpoint (ex: multi_loss) sur toutes les tâches STS
+# partial_freeze (stratégie recommandée)
 uv run python src/evaluate.py \
-    --model-path outputs/multi_loss \
+    --model-path outputs/partial_freeze/bert_inference \
     --mode test \
     --task-set sts \
-    --output-json outputs/our_model_sts.json
+    --output-json outputs/partial_freeze_sts.json
+
+# multi_loss (full fine-tune, si lancé)
+uv run python src/evaluate.py \
+    --model-path outputs/multi_loss/bert_inference \
+    --mode test \
+    --task-set sts \
+    --output-json outputs/multi_loss_sts.json
 
 # Optionnel : tâches de transfert (classification)
 uv run python src/evaluate.py \
-    --model-path outputs/multi_loss \
+    --model-path outputs/partial_freeze/bert_inference \
     --mode test \
     --task-set transfer \
-    --output-json outputs/our_model_transfer.json
+    --output-json outputs/partial_freeze_transfer.json
 ```
 
 ---
@@ -71,14 +86,14 @@ uv run python src/evaluate.py \
 uv run python scripts/run_baselines.py \
     --mode test \
     --task-set sts \
-    --our-model outputs/multi_loss \
+    --our-model outputs/partial_freeze/bert_inference \
     --output-json outputs/comparison_sts.json
 
 # Avec les tâches de transfert aussi
 uv run python scripts/run_baselines.py \
     --mode test \
     --task-set full \
-    --our-model outputs/multi_loss \
+    --our-model outputs/partial_freeze/bert_inference \
     --output-json outputs/comparison_full.json
 ```
 
