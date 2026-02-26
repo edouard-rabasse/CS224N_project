@@ -14,12 +14,12 @@ venv/
 env/
 
 # Data (large files)
-data/
+data
 !data/.gitkeep
 !src/data
 
 # Training outputs
-outputs/
+outputs
 runs/
 wandb/
 mlruns/

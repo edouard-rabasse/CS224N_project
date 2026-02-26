@@ -120,6 +120,21 @@ class SyntaxBertModel(nn.Module):
         if self.freeze_gnn:
             self._freeze_gnn()
 
+        # ---- Partial BERT freezing ----
+        # num_unfrozen_layers controls how many encoder layers are trainable:
+        #   None  → fine-tune ALL layers (full fine-tuning, default)
+        #   0     → freeze ALL encoder layers + embeddings, only pooler/MLP head trainable
+        #   N > 0 → freeze layers 0..(L-N-1), fine-tune last N layers + pooler
+        bert_config = getattr(bert_model, "config", None)
+        self._num_bert_layers = getattr(bert_config, "num_hidden_layers", 12)
+        num_unfrozen = alignment_config.get("num_unfrozen_layers", None)
+        if num_unfrozen is None:
+            # Also check gnn_config for backwards compat
+            num_unfrozen = gnn_config.get("num_unfrozen_layers", None)
+        self.num_unfrozen_layers = num_unfrozen
+        if num_unfrozen is not None:
+            self._partial_freeze_bert(num_unfrozen)
+
     def _freeze_gnn(self) -> None:
         """Freeze all GNN parameters."""
         for param in self.gnn.parameters():
@@ -131,9 +146,74 @@ class SyntaxBertModel(nn.Module):
             param.requires_grad = False
 
     def _unfreeze_bert(self) -> None:
-        """Unfreeze all BERT parameters (used in phase 2 of freeze-then-align)."""
+        """Unfreeze BERT parameters, respecting partial freeze if configured.
+
+        If ``num_unfrozen_layers`` is set (including 0), only the specified
+        layers + pooler are unfrozen. Otherwise all parameters are unfrozen.
+        """
+        if self.num_unfrozen_layers is not None:
+            self._partial_freeze_bert(self.num_unfrozen_layers)
+        else:
+            for param in self.bert.parameters():
+                param.requires_grad = True
+
+    def _partial_freeze_bert(self, num_unfrozen: int) -> None:
+        """Freeze all BERT layers except the last ``num_unfrozen`` encoder layers.
+
+        If ``num_unfrozen == 0``, ALL encoder layers + embeddings are frozen;
+        only the pooler and SimCSE MLP head remain trainable.
+
+        Frozen: embeddings + encoder layers 0 .. (L - num_unfrozen - 1).
+        Trainable: encoder layers (L - num_unfrozen) .. (L-1) + pooler.
+
+        Works with both SimCSE's BertForCL (which wraps .bert) and plain
+        HuggingFace BertModel.
+
+        Args:
+            num_unfrozen: Number of top encoder layers to keep trainable.
+        """
+        # First freeze everything
         for param in self.bert.parameters():
-            param.requires_grad = True
+            param.requires_grad = False
+
+        # Resolve the inner encoder (SimCSE wraps as self.bert.bert)
+        inner_bert = getattr(self.bert, "bert", self.bert)
+        encoder_layers = None
+        if hasattr(inner_bert, "encoder") and hasattr(inner_bert.encoder, "layer"):
+            encoder_layers = inner_bert.encoder.layer
+        elif hasattr(inner_bert, "layers"):
+            encoder_layers = inner_bert.layers
+
+        if encoder_layers is None:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "Could not find encoder layers for partial freeze — unfreezing all BERT params."
+            )
+            for param in self.bert.parameters():
+                param.requires_grad = True
+            return
+
+        total_layers = len(encoder_layers)
+        first_unfrozen = max(total_layers - num_unfrozen, 0)
+
+        # Unfreeze last N layers
+        for i in range(first_unfrozen, total_layers):
+            for param in encoder_layers[i].parameters():
+                param.requires_grad = True
+
+        # Unfreeze pooler (always trainable when BERT is active)
+        if hasattr(inner_bert, "pooler") and inner_bert.pooler is not None:
+            for param in inner_bert.pooler.parameters():
+                param.requires_grad = True
+
+        # Unfreeze SimCSE's custom pooler + MLP if present
+        if self._is_simcse:
+            if hasattr(self.bert, "pooler"):
+                for param in self.bert.pooler.parameters():
+                    param.requires_grad = True
+            if hasattr(self.bert, "mlp"):
+                for param in self.bert.mlp.parameters():
+                    param.requires_grad = True
 
     def _unfreeze_gnn(self) -> None:
         """Unfreeze all GNN parameters."""

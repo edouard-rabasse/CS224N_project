@@ -92,6 +92,11 @@ def main() -> None:
     gnn_cfg = cast(dict[str, Any], OmegaConf.to_container(cfg.model.gnn, resolve=True))
     align_cfg = cast(dict[str, Any], OmegaConf.to_container(cfg.model.alignment, resolve=True))
 
+    # Pass num_unfrozen_layers from bert config into alignment_config for the model
+    bert_cfg_dict = cast(dict[str, Any], OmegaConf.to_container(cfg.model.bert, resolve=True))
+    if bert_cfg_dict.get("num_unfrozen_layers") is not None:
+        align_cfg["num_unfrozen_layers"] = bert_cfg_dict["num_unfrozen_layers"]
+
     model = SyntaxBertModel(
         bert_model=bert_model,
         gnn_config=gnn_cfg,
@@ -100,6 +105,13 @@ def main() -> None:
     logger.info("SyntaxBertModel initialized")
     logger.info(f"  GNN: {gnn_cfg['conv_type'].upper()}, {gnn_cfg['num_layers']} layers, pooling={gnn_cfg['pooling']}")
     logger.info(f"  Alignment: λ={align_cfg['lambda_align']}, μ={align_cfg['mu_gnn']}, τ={align_cfg['align_temperature']}")
+    unfrozen = bert_cfg_dict.get("num_unfrozen_layers")
+    if unfrozen is not None and unfrozen == 0:
+        logger.info(f"  BERT: all encoder layers frozen — only pooler/MLP head trainable")
+    elif unfrozen is not None:
+        logger.info(f"  BERT partial freeze: last {unfrozen}/{model._num_bert_layers} layers trainable")
+    else:
+        logger.info(f"  BERT: all {model._num_bert_layers} layers trainable (full fine-tuning)")
 
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
