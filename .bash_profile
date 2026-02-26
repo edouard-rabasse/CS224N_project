@@ -1,0 +1,1 @@
+echo '[[ -f ~/.bashrc ]] && . ~/.bashrc' >> ~/.bash_profile

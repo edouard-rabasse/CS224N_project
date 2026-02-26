@@ -1,0 +1,24 @@
+# =============================================================================
+# Ablation: Partial BERT freeze (fine-tune last N layers only)
+# =============================================================================
+# Freezes early BERT encoder layers and only fine-tunes the last N layers
+# plus the pooler. This reduces training cost and can help avoid catastrophic
+# forgetting of pre-trained representations.
+#
+# Default: fine-tune last 4 layers (freeze layers 0-7).
+# Override:  uv run python src/train.py experiment=ablation/freeze_bert_layers model.bert.num_unfrozen_layers=2
+
+experiment_name: ablation_freeze_bert_layers
+
+model:
+  bert:
+    num_unfrozen_layers: 4   # fine-tune layers 8-11 + pooler; freeze layers 0-7
+  gnn:
+    freeze: false
+  alignment:
+    lambda_align: 0.1
+    mu_gnn: 0.05
+    stop_grad_gnn: false
+
+training:
+  output_dir: outputs/${experiment_name}
