@@ -24,6 +24,7 @@ dependencies = [
     "dacite>=1.8",
     "numpy>=1.24",
     "accelerate>=1.1.0",
+    "prettytable>=3.17.0",
 ]
 
 [project.optional-dependencies]
