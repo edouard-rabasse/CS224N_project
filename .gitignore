@@ -16,6 +16,7 @@ env/
 # Data (large files)
 data/
 !data/.gitkeep
+!src/data
 
 # Training outputs
 outputs/
