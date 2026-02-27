@@ -6,7 +6,7 @@
 model_name_or_path: bert-base-uncased
 pooler_type: cls             # cls | cls_before_pooler | avg | avg_top2 | avg_first_last
 temp: 0.05                   # temperature for SimCSE contrastive loss
-num_unfrozen_layers: 0    # null = fine-tune all 12 layers; integer N = freeze layers 0..(11-N), fine-tune last N + pooler + embeddings head
+num_unfrozen_layers: null    # null = fine-tune all 12 layers; integer N = freeze layers 0..(11-N), fine-tune last N + pooler + embeddings head
 do_mlm: false                # multi-task with masked language modeling
 mlm_weight: 0.1              # weight of MLM loss (if do_mlm=true)
 mlp_only_train: true         # use MLP projection only during training

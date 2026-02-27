@@ -461,13 +461,22 @@ class SyntaxBertModel(nn.Module):
         out = Path(output_dir)
         out.mkdir(parents=True, exist_ok=True)
 
-        # BERT branch: save in HuggingFace format so it can be loaded standalone
+        # BERT branch: save in HuggingFace format so it can be loaded standalone.
+        # When wrapping SimCSE's BertForCL, save the *inner* BertModel directly
+        # (self.bert.bert) so that BertModel.from_pretrained() loads without any
+        # key-prefix mismatch.  Saving the outer BertForCL would prefix all
+        # encoder keys with "bert." and they would be silently ignored on reload.
         bert_dir = out / "bert_weights"
-        if hasattr(self.bert, "save_pretrained"):
-            getattr(self.bert, "save_pretrained")(str(bert_dir))
+        bert_to_save = (
+            self.bert.bert
+            if self._is_simcse and hasattr(self.bert, "bert")
+            else self.bert
+        )
+        if hasattr(bert_to_save, "save_pretrained"):
+            bert_to_save.save_pretrained(str(bert_dir))
         else:
             bert_dir.mkdir(parents=True, exist_ok=True)
-            torch.save(self.bert.state_dict(), bert_dir / "pytorch_model.bin")
+            torch.save(bert_to_save.state_dict(), bert_dir / "pytorch_model.bin")
 
         # GNN + projection heads: save as a plain state dict
         gnn_state: dict = {"gnn": self.gnn.state_dict()}
@@ -499,10 +508,15 @@ class SyntaxBertModel(nn.Module):
         """
         out = Path(output_dir)
         out.mkdir(parents=True, exist_ok=True)
-        if hasattr(self.bert, "save_pretrained"):
-            getattr(self.bert, "save_pretrained")(str(out))
+        bert_to_save = (
+            self.bert.bert
+            if self._is_simcse and hasattr(self.bert, "bert")
+            else self.bert
+        )
+        if hasattr(bert_to_save, "save_pretrained"):
+            bert_to_save.save_pretrained(str(out))
         else:
-            torch.save(self.bert.state_dict(), out / "pytorch_model.bin")
+            torch.save(bert_to_save.state_dict(), out / "pytorch_model.bin")
 
     @classmethod
     def from_checkpoint(

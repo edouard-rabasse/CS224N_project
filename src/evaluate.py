@@ -173,13 +173,22 @@ def _load_syntax_bert_model(model_path: str, device: torch.device):
 
 
 def _load_bert_only_wrapper(model_path: str, device: torch.device):
-    """Wrap a plain HuggingFace BERT as a minimal SyntaxBertModel (inference only)."""
+    """Wrap a HuggingFace BERT as a minimal SyntaxBertModel (inference only).
+
+    Uses ``add_pooling_layer=False`` so inference falls back to
+    ``last_hidden_state[:, 0]`` (raw CLS token), matching SimCSE's
+    ``pooler_type="cls"`` inference behaviour.  ``from_pretrained`` handles
+    old-style ``beta``/``gamma`` → ``weight``/``bias`` renaming automatically.
+    """
     from transformers import BertModel
 
     from src.models.wrapper import SyntaxBertModel
 
-    bert_model = BertModel.from_pretrained(model_path)
-    # Minimal GNN / alignment configs — not used at inference
+    # add_pooling_layer=False: SimCSE's BertForCL creates its inner BertModel
+    # without a pooler.  At inference (pooler_type="cls", mlp_only_train=True)
+    # it returns last_hidden_state[:, 0] directly.  wrapper.py's non-SimCSE
+    # path does the same when pooler_output is None.
+    bert_model = BertModel.from_pretrained(model_path, add_pooling_layer=False)
     wrapper = SyntaxBertModel(
         bert_model=bert_model,
         gnn_config={"conv_type": "gat", "num_layers": 2, "hidden_dim": bert_model.config.hidden_size},
@@ -215,7 +224,7 @@ def build_batcher(model, tokenizer, device: torch.device, args: argparse.Namespa
             truncation=True,
             max_length=max_length or args.max_length,
         )
-        encoded = tokenizer.batch_encode_plus(sentences, **enc_kwargs)
+        encoded = tokenizer(sentences, **enc_kwargs)
         input_ids = encoded["input_ids"].to(device)
         attention_mask = encoded["attention_mask"].to(device)
 
