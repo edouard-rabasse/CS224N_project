@@ -1,5 +1,5 @@
 """
-run_baselines.py — Evaluate and compare baseline models on STS + transfer tasks.
+run_baselines.py — Evaluate and compare baseline models on STS + transfer + probing tasks.
 
 Runs SentEval evaluation on:
   1. bert-base-uncased          (plain BERT, CLS pooling)
@@ -16,6 +16,12 @@ Usage:
     uv run python scripts/run_baselines.py \
         --mode test --task-set sts \
         --our-model outputs/multi_loss
+
+    # Probing tasks
+    uv run python scripts/run_baselines.py --mode test --task-set probing
+
+    # All tasks
+    uv run python scripts/run_baselines.py --mode test --task-set full
 
     # Fast dev run
     uv run python scripts/run_baselines.py --mode dev --task-set sts
@@ -45,6 +51,7 @@ SENTEVAL_DATA = SENTEVAL_PATH / "data"
 
 STS_TASKS = ["STS12", "STS13", "STS14", "STS15", "STS16", "STSBenchmark", "SICKRelatedness"]
 TRANSFER_TASKS = ["MR", "CR", "SUBJ", "MPQA", "SST2", "TREC", "MRPC"]
+PROBING_TASKS = ['Length', 'WordContent', 'Depth', 'TopConstituents','BigramShift', 'Tense', 'SubjNumber', 'ObjNumber', 'OddManOut', 'CoordinationInversion']
 
 
 # =============================================================================
@@ -64,8 +71,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--task-set",
         type=str,
-        choices=["sts", "transfer", "full"],
+        choices=["sts", "transfer", "probing", "full"],
         default="sts",
+        help="sts: STS tasks; transfer: classification tasks; probing: linguistic probing tasks; full: all three.",
     )
     parser.add_argument(
         "--tasks",
@@ -186,8 +194,12 @@ def extract_scores(results: dict, tasks: list[str], mode: str) -> dict[str, floa
                 scores[task] = r["dev"]["spearman"][0] * 100
             else:
                 scores[task] = r["all"]["spearman"]["all"] * 100
+        elif task in TRANSFER_TASKS:
+            scores[task] = r.get("devacc" if mode == "dev" else "acc", float("nan"))
+        elif task in PROBING_TASKS:
+            # Probing tasks report accuracy under "devacc" / "acc"
+            scores[task] = r.get("devacc" if mode == "dev" else "acc", float("nan"))
         else:
-            # Transfer tasks
             scores[task] = r.get("devacc" if mode == "dev" else "acc", float("nan"))
     return scores
 
@@ -247,8 +259,10 @@ def main() -> None:
         tasks = STS_TASKS
     elif args.task_set == "transfer":
         tasks = TRANSFER_TASKS
+    elif args.task_set == "probing":
+        tasks = PROBING_TASKS
     else:
-        tasks = STS_TASKS + TRANSFER_TASKS
+        tasks = STS_TASKS + TRANSFER_TASKS + PROBING_TASKS
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Device: {device}")
@@ -316,11 +330,14 @@ def main() -> None:
     # ---- Print results ----
     sts_tasks_present = [t for t in STS_TASKS if t in tasks]
     transfer_tasks_present = [t for t in TRANSFER_TASKS if t in tasks]
+    probing_tasks_present = [t for t in PROBING_TASKS if t in tasks]
 
     if sts_tasks_present:
         print_comparison_table(all_scores, sts_tasks_present, f"STS Results ({args.mode})")
     if transfer_tasks_present:
         print_comparison_table(all_scores, transfer_tasks_present, f"Transfer Results ({args.mode})")
+    if probing_tasks_present:
+        print_comparison_table(all_scores, probing_tasks_present, f"Probing Results ({args.mode})")
 
     # ---- Save JSON ----
     out_path = Path(args.output_json)
