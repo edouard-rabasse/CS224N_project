@@ -105,7 +105,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--senteval-path",
         type=str,
-        default="./SentEval",
+        default="./SimCSE/SentEval",
         help="Path to the SentEval repository root.",
     )
     parser.add_argument(
@@ -150,11 +150,13 @@ def _load_syntax_bert_model(model_path: str, device: torch.device):
     ckpt_dir = Path(model_path)
 
     # Try full checkpoint first (contains GNN weights + config)
-    full_ckpt = ckpt_dir / "syntax_bert_state.pt"
+    # save_checkpoint writes: bert_weights/, gnn_state.pt, model_config.json
+    gnn_ckpt = ckpt_dir / "gnn_state.pt"
+    model_cfg_path = ckpt_dir / "model_config.json"
     bert_only_dir = ckpt_dir / "bert_weights"
-    hydra_cfg_path = ckpt_dir / "config.yaml"
+    bert_inference_dir = ckpt_dir / "bert_inference"
 
-    if full_ckpt.exists() and hydra_cfg_path.exists():
+    if gnn_ckpt.exists() and model_cfg_path.exists() and bert_only_dir.exists():
         logger.info(f"Loading full SyntaxBertModel checkpoint from {ckpt_dir}")
         return SyntaxBertModel.from_checkpoint(str(ckpt_dir), device=device)
 
@@ -164,7 +166,11 @@ def _load_syntax_bert_model(model_path: str, device: torch.device):
         # with random GNN weights (GNN is unused at inference anyway)
         return _load_bert_only_wrapper(str(bert_only_dir), device)
 
-    # Fallback: treat model_path as a plain HuggingFace model
+    if bert_inference_dir.exists():
+        logger.info(f"Loading BERT-only weights from {bert_inference_dir} (inference mode)")
+        return _load_bert_only_wrapper(str(bert_inference_dir), device)
+
+    # Fallback: treat model_path as a plain HuggingFace model / BERT-only dir
     logger.warning(
         f"No SyntaxBertModel checkpoint found at {ckpt_dir}. "
         "Loading as plain HuggingFace BERT (no GNN)."
@@ -282,13 +288,13 @@ def print_sts_results(results: dict, mode: str) -> dict[str, float]:
         if task not in results:
             continue
         task_names.append(task)
-        if mode == "dev":
-            scores.append(results[task]["dev"]["spearman"][0] * 100)
-        else:  # test / fasttest
-            if task in ("STSBenchmark", "SICKRelatedness"):
-                scores.append(results[task]["test"]["spearman"].correlation * 100)
-            else:
-                scores.append(results[task]["all"]["spearman"]["all"] * 100)
+        if task in ("STSBenchmark", "SICKRelatedness"):
+            # These tasks have dev/test splits
+            split = "dev" if mode == "dev" else "test"
+            scores.append(results[task][split]["spearman"].correlation * 100)
+        else:
+            # STS12–16: no dev split, always use "all"
+            scores.append(results[task]["all"]["spearman"]["all"] * 100)
 
     if task_names:
         avg = sum(scores) / len(scores)
@@ -420,13 +426,53 @@ def main() -> None:
 def _resolve_bert_path(model_path: str) -> str:
     """Return the BERT tokenizer path from a SyntaxBertModel checkpoint directory.
 
-    Looks for ``bert_weights/`` sub-directory first, then falls back to the
-    checkpoint directory itself (which may be a raw HuggingFace model name).
+    Looks for ``bert_weights/`` or ``bert_inference/`` sub-directories first,
+    then falls back to the checkpoint directory itself (which may be a raw
+    HuggingFace model name).
+
+    If the resolved directory has no tokenizer files, falls back to the
+    ``model_name_or_path`` from the BERT config (e.g. ``bert-base-uncased``).
     """
     ckpt_dir = Path(model_path)
-    bert_subdir = ckpt_dir / "bert_weights"
-    if bert_subdir.exists():
-        return str(bert_subdir)
+    for subdir_name in ("bert_weights", "bert_inference"):
+        subdir = ckpt_dir / subdir_name
+        if subdir.exists():
+            # Check if tokenizer files exist here
+            if (subdir / "tokenizer.json").exists() or (subdir / "vocab.txt").exists():
+                return str(subdir)
+            # No tokenizer files — fall through to config-based fallback below
+            break
+
+    # Check the base directory for tokenizer files
+    if (ckpt_dir / "tokenizer.json").exists() or (ckpt_dir / "vocab.txt").exists():
+        return str(ckpt_dir)
+
+    # No tokenizer files found — try to read model_type from config.json and
+    # resolve to a known HuggingFace hub model (e.g. bert-base-uncased)
+    config_path = ckpt_dir / "config.json"
+    for candidate in (ckpt_dir, ckpt_dir / "bert_weights", ckpt_dir / "bert_inference"):
+        cfg_file = candidate / "config.json"
+        if cfg_file.exists():
+            config_path = cfg_file
+            break
+
+    if config_path.exists():
+        import json as _json
+        with open(config_path) as f:
+            cfg = _json.load(f)
+        # Use _name_or_path if available (set by save_pretrained),
+        # otherwise fall back to model_type-base-uncased
+        name = cfg.get("_name_or_path", "")
+        if name and not name.startswith("/"):
+            logger.info(f"No tokenizer files at {ckpt_dir}; using tokenizer from '{name}'")
+            return name
+        # Last resort: infer from model_type (e.g. "bert" → "bert-base-uncased")
+        model_type = cfg.get("model_type", "")
+        if model_type:
+            fallback = f"{model_type}-base-uncased"
+            logger.info(f"No tokenizer files at {ckpt_dir}; falling back to '{fallback}'")
+            return fallback
+
     return model_path
 
 

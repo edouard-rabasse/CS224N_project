@@ -446,7 +446,7 @@ class SyntaxBertModel(nn.Module):
     # Checkpointing
     # ------------------------------------------------------------------
 
-    def save_checkpoint(self, output_dir: str) -> None:
+    def save_checkpoint(self, output_dir: str, tokenizer=None) -> None:
         """Save both BERT and GNN weights to ``output_dir``.
 
         Saves:
@@ -457,6 +457,7 @@ class SyntaxBertModel(nn.Module):
 
         Args:
             output_dir: Directory to write the checkpoint into (created if absent).
+            tokenizer: Optional tokenizer to save alongside the weights.
         """
         out = Path(output_dir)
         out.mkdir(parents=True, exist_ok=True)
@@ -478,6 +479,12 @@ class SyntaxBertModel(nn.Module):
             bert_dir.mkdir(parents=True, exist_ok=True)
             torch.save(bert_to_save.state_dict(), bert_dir / "pytorch_model.bin")
 
+        # Save tokenizer alongside BERT weights so eval can find it
+        if tokenizer is not None and hasattr(tokenizer, "save_pretrained"):
+            tokenizer.save_pretrained(str(bert_dir))
+        else:
+            print("Warning: tokenizer not saved with checkpoint; make sure to provide it during evaluation for consistent tokenization.")
+
         # GNN + projection heads: save as a plain state dict
         gnn_state: dict = {"gnn": self.gnn.state_dict()}
         if self.bert_projector is not None:
@@ -497,7 +504,7 @@ class SyntaxBertModel(nn.Module):
         with open(out / "model_config.json", "w") as f:
             json.dump(cfg, f, indent=2)
 
-    def save_bert_only(self, output_dir: str) -> None:
+    def save_bert_only(self, output_dir: str, tokenizer=None) -> None:
         """Save only the BERT branch in HuggingFace format.
 
         Use this to produce an inference checkpoint that is directly
@@ -505,6 +512,7 @@ class SyntaxBertModel(nn.Module):
 
         Args:
             output_dir: Destination directory (created if absent).
+            tokenizer: Optional tokenizer to save alongside the weights.
         """
         out = Path(output_dir)
         out.mkdir(parents=True, exist_ok=True)
@@ -517,6 +525,10 @@ class SyntaxBertModel(nn.Module):
             bert_to_save.save_pretrained(str(out))
         else:
             torch.save(bert_to_save.state_dict(), out / "pytorch_model.bin")
+
+        # Save tokenizer so the checkpoint is self-contained for evaluation
+        if tokenizer is not None and hasattr(tokenizer, "save_pretrained"):
+            tokenizer.save_pretrained(str(out))
 
     @classmethod
     def from_checkpoint(
@@ -549,8 +561,10 @@ class SyntaxBertModel(nn.Module):
         hidden_dim: int = saved_cfg["hidden_dim"]
 
         # Reconstruct BERT
+        # add_pooling_layer=False: SimCSE's inner BertModel has no pooler;
+        # inference uses last_hidden_state[:, 0] (cls_before_pooler style).
         if bert_dir.exists():
-            bert_model = BertModel.from_pretrained(str(bert_dir))
+            bert_model = BertModel.from_pretrained(str(bert_dir), add_pooling_layer=False)
         else:
             raise FileNotFoundError(f"bert_weights/ not found in {ckpt}")
 

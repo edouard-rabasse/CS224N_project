@@ -334,7 +334,7 @@ class SyntaxCLTrainer(Trainer):
         checkpoint_folder = f"checkpoint-{self.state.global_step}"
         output_dir = Path(self.args.output_dir) / checkpoint_folder
         if hasattr(model, "save_checkpoint"):
-            model.save_checkpoint(str(output_dir))  # type: ignore[union-attr]
+            model.save_checkpoint(str(output_dir), tokenizer=self.tokenizer)  # type: ignore[union-attr]
             logger.info(f"[SyntaxCLTrainer] Saved BERT+GNN checkpoint → {output_dir}")
 
     def save_model(self, output_dir: str | None = None, _internal_call: bool = False) -> None:
@@ -352,12 +352,12 @@ class SyntaxCLTrainer(Trainer):
 
         model = self.model
         if hasattr(model, "save_checkpoint"):
-            model.save_checkpoint(out)  # type: ignore[union-attr]
+            model.save_checkpoint(out, tokenizer=self.tokenizer)  # type: ignore[union-attr]
             logger.info(f"[SyntaxCLTrainer] Full checkpoint saved → {out}")
 
         if hasattr(model, "save_bert_only"):
             bert_inference_dir = str(Path(out) / "bert_inference")
-            model.save_bert_only(bert_inference_dir)  # type: ignore[union-attr]
+            model.save_bert_only(bert_inference_dir, tokenizer=self.tokenizer)  # type: ignore[union-attr]
             logger.info(
                 f"[SyntaxCLTrainer] BERT-only inference checkpoint saved → {bert_inference_dir}"
             )

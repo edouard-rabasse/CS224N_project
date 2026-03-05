@@ -41,5 +41,3 @@ data:
   max_train_samples: null     # null = use all, set integer to subsample
   preprocessing_num_workers: 8
 
-# ---- Experiment identifier (set by experiment configs) ----
-experiment_name: default
