@@ -117,7 +117,8 @@ class SyntaxCLTrainer(Trainer):
         )
 
         # ---- Dataset & collator ----
-        tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path)
+        tokenizer = self.tokenizer
         sentences = self._load_sentences(data_args)
 
         dataset = SyntaxGraphDataset(
