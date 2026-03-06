@@ -15,19 +15,19 @@ experiment_name: freeze_then_align
 
 training:
   # Phase 1: GNN warmup
-  phase1_epochs: 5
+  phase1_epochs: 3
   phase1_lr: 1.0e-3       # higher LR for GNN warmup
   phase1_freeze_bert: true
   # Phase 2: Joint alignment
-  phase2_epochs: 10
+  phase2_epochs: 3
   phase2_lr: 3.0e-5
   phase2_freeze_bert: false
-  num_train_epochs: 15     # total = phase1 + phase2
+  num_train_epochs: 6     # total = phase1 + phase2
 
 model:
   gnn:
     freeze: false
   alignment:
     lambda_align: 0.1
-    mu_gnn: 0.05
+    mu_gnn: 0.01
     stop_grad_gnn: false

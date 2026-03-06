@@ -89,6 +89,12 @@ def parse_args() -> argparse.Namespace:
         help="Path to our trained SyntaxBertModel checkpoint (optional).",
     )
     parser.add_argument(
+        "--no-baselines",
+        action="store_true",
+        default=False,
+        help="Skip BERT and SimCSE baselines; evaluate only --our-model.",
+    )
+    parser.add_argument(
         "--output-json",
         type=str,
         default="outputs/baseline_comparison.json",
@@ -280,7 +286,11 @@ def main() -> None:
     all_scores: dict[str, dict[str, float]] = {}
     all_raw: dict[str, dict] = {}
 
-    for display_name, model_id, pooler in baselines:
+    if args.no_baselines and not args.our_model:
+        logger.error("--no-baselines requires --our-model to be set.")
+        sys.exit(1)
+
+    for display_name, model_id, pooler in ([] if args.no_baselines else baselines):
         logger.info(f"\n{'='*50}")
         logger.info(f"  Evaluating: {display_name}  ({model_id})")
         logger.info(f"{'='*50}")
