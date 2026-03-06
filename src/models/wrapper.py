@@ -115,6 +115,7 @@ class SyntaxBertModel(nn.Module):
 
         # ---- Strategy flags ----
         self.stop_grad_gnn = alignment_config.get("stop_grad_gnn", False)
+        self.detach_bert_for_gnn = alignment_config.get("detach_bert_for_gnn", False)
         self.freeze_gnn = gnn_config.get("freeze", False)
 
         if self.freeze_gnn:
@@ -349,7 +350,8 @@ class SyntaxBertModel(nn.Module):
         last_hidden_flat = bert_outputs.last_hidden_state  # (bs * num_sent, seq_len, D)
         last_hidden_v1 = last_hidden_flat[0::num_sent]     # (bs, seq_len, D) — view 1
 
-        h_gnn = self._compute_gnn_embeddings(last_hidden_v1, graph_batch, token_to_word_maps)
+        gnn_input = last_hidden_v1.detach() if self.detach_bert_for_gnn else last_hidden_v1
+        h_gnn = self._compute_gnn_embeddings(gnn_input, graph_batch, token_to_word_maps)
 
         # Stop-gradient on GNN branch if configured
         if self.stop_grad_gnn:

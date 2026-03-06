@@ -90,10 +90,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--task-set",
         type=str,
-        choices=["sts", "transfer", "full", "na"],
+        choices=["sts", "transfer", "probing", "full", "na"],
         default="sts",
         help="sts: STS12-16 + STSBenchmark + SICKRelatedness; "
-        "transfer: classification tasks; full: both.",
+        "transfer: classification tasks; probing: linguistic probing tasks; full: all three.",
     )
     parser.add_argument(
         "--tasks",
@@ -330,6 +330,31 @@ def print_transfer_results(results: dict, mode: str) -> dict[str, float]:
     return {n: s for n, s in zip(task_names, scores)}
 
 
+def print_probing_results(results: dict, mode: str) -> dict[str, float]:
+    """Print probing task results table and return a flat score dict."""
+    probing_tasks = ['Length', 'WordContent', 'Depth', 'TopConstituents', 'BigramShift',
+                     'Tense', 'SubjNumber', 'ObjNumber', 'OddManOut', 'CoordinationInversion']
+    task_names, scores = [], []
+
+    for task in probing_tasks:
+        if task not in results:
+            continue
+        task_names.append(task)
+        if mode == "dev":
+            scores.append(results[task].get("devacc", 0.0))
+        else:
+            scores.append(results[task].get("acc", 0.0))
+
+    if task_names:
+        avg = sum(scores) / len(scores)
+        task_names.append("Avg.")
+        scores.append(avg)
+        print(f"\n------ Probing ({mode}) ------")
+        _print_table(task_names, [f"{s:.2f}" for s in scores])
+
+    return {n: s for n, s in zip(task_names, scores)}
+
+
 # =============================================================================
 # Main
 # =============================================================================
@@ -377,10 +402,15 @@ def main() -> None:
         tasks = ["STS12", "STS13", "STS14", "STS15", "STS16", "STSBenchmark", "SICKRelatedness"]
     elif args.task_set == "transfer":
         tasks = ["MR", "CR", "MPQA", "SUBJ", "SST2", "TREC", "MRPC"]
+    elif args.task_set == "probing":
+        tasks = ['Length', 'WordContent', 'Depth', 'TopConstituents', 'BigramShift', 'Tense',
+                 'SubjNumber', 'ObjNumber', 'OddManOut', 'CoordinationInversion']
     elif args.task_set == "full":
         tasks = [
             "STS12", "STS13", "STS14", "STS15", "STS16", "STSBenchmark", "SICKRelatedness",
             "MR", "CR", "MPQA", "SUBJ", "SST2", "TREC", "MRPC",
+            'Length', 'WordContent', 'Depth', 'TopConstituents', 'BigramShift', 'Tense',
+            'SubjNumber', 'ObjNumber', 'OddManOut', 'CoordinationInversion',
         ]
     else:
         tasks = []
@@ -413,6 +443,7 @@ def main() -> None:
     flat_scores: dict[str, float] = {}
     flat_scores.update(print_sts_results(raw_results, args.mode))
     flat_scores.update(print_transfer_results(raw_results, args.mode))
+    flat_scores.update(print_probing_results(raw_results, args.mode))
 
     # --- Save JSON summary ---
     if args.output_json:
