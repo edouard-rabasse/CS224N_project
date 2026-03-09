@@ -35,6 +35,40 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 
+class LambdaWarmupCallback(TrainerCallback):
+    """Linearly ramp ``lambda_align`` from 0 to its target value over
+    ``warmup_steps`` training steps.
+
+    This prevents the alignment loss from applying gradient pressure on BERT
+    toward a randomly-initialized GNN at the start of training — the GNN gets
+    ``warmup_steps`` steps to learn meaningful representations first.
+
+    Args:
+        loss_fn: The ``CombinedLoss`` instance whose ``lambda_align`` to schedule.
+        target_lambda: The final ``lambda_align`` value to reach at step ``warmup_steps``.
+        warmup_steps: Number of steps over which to linearly ramp λ from 0 to target.
+    """
+
+    def __init__(self, loss_fn: CombinedLoss, target_lambda: float, warmup_steps: int) -> None:
+        self.loss_fn = loss_fn
+        self.target_lambda = target_lambda
+        self.warmup_steps = warmup_steps
+        # Start at 0
+        self.loss_fn.lambda_align = 0.0
+
+    def on_step_begin(
+        self,
+        args: TrainingArguments,
+        state: TrainerState,
+        control: TrainerControl,
+        **kwargs,
+    ) -> None:
+        if state.global_step < self.warmup_steps:
+            self.loss_fn.lambda_align = self.target_lambda * state.global_step / self.warmup_steps
+        else:
+            self.loss_fn.lambda_align = self.target_lambda
+
+
 class FreezeThawCallback(TrainerCallback):
     """TrainerCallback that transitions from Phase 1 → Phase 2 at a set epoch.
 
@@ -140,6 +174,18 @@ class SyntaxCLTrainer(Trainer):
 
         # ---- Phase callbacks ----
         callbacks: list[TrainerCallback] = []
+
+        # Lambda warmup: ramp λ from 0 to target over warmup_steps steps
+        lambda_warmup_steps = align_cfg.get("lambda_warmup_steps", 0)
+        if lambda_warmup_steps > 0:
+            target_lambda = align_cfg.get("lambda_align", 0.1)
+            logger.info(f"Lambda warmup: λ will ramp 0 → {target_lambda} over {lambda_warmup_steps} steps.")
+            callbacks.append(LambdaWarmupCallback(
+                loss_fn=self._combined_loss,
+                target_lambda=target_lambda,
+                warmup_steps=lambda_warmup_steps,
+            ))
+
         experiment = cfg.get("experiment_name", "multi_loss")
         if experiment == "freeze_then_align":
             phase1_epochs = training_cfg.get("phase1_epochs", 5)

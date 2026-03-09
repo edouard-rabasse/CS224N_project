@@ -65,44 +65,54 @@ def _worker_init(use_gpu: bool) -> None:
     _worker_parser = StanzaSyntaxParser(use_gpu=use_gpu)
 
 
-def _parse_and_save_chunk(task: tuple[list[str], Path]) -> tuple[Path, int, int]:
+def _parse_and_save_chunk(task: tuple[list[str], Path, int]) -> tuple[Path, int, int]:
     """Parse a list of sentences and write them to a single .jsonl chunk file.
 
     Args:
-        task: (sentences, output_path) pair.
+        task: (sentences, output_path, batch_size) triple.
 
     Returns:
         (output_path, n_parsed, n_failed) tuple.
     """
-    sentences, out_path = task
+    sentences, out_path, batch_size = task
     global _worker_parser
 
     results: list[dict] = []
     n_failed = 0
 
-    for sent in sentences:
-        sent = sent.strip()
+    sentences = [s.strip() for s in sentences]
+    num_batches = (len(sentences) + batch_size - 1) // batch_size
+
+    for bi in range(num_batches):
+        batch = sentences[bi * batch_size : (bi + 1) * batch_size]
         try:
-            parse = _worker_parser.parse_sentence(sent)  # type: ignore[union-attr]
-            parse["sentence"] = sent
-            results.append(parse)
+            parses = _worker_parser.parse_sentences_batch(batch)  # type: ignore[union-attr]
+            for sent, parse in zip(batch, parses):
+                parse["sentence"] = sent
+                results.append(parse)
         except Exception as exc:
-            n_failed += 1
-            logger.warning(f"Parse failed: {sent[:60]!r} — {exc}")
-            # Fallback: whitespace-split tokens, no edges
-            words = sent.split()
-            results.append(
-                {
-                    "tokens": words,
-                    "edges_src": [],
-                    "edges_dst": [],
-                    "deprels": [],
-                    "pos_tags": [],
-                    "num_tokens": max(len(words), 1),
-                    "sentence": sent,
-                    "parse_error": str(exc),
-                }
-            )
+            logger.warning(f"Batch failed, falling back one-by-one: {exc}")
+            for sent in batch:
+                try:
+                    parse = _worker_parser.parse_sentence(sent)  # type: ignore[union-attr]
+                    parse["sentence"] = sent
+                    results.append(parse)
+                except Exception as exc2:
+                    n_failed += 1
+                    logger.warning(f"Parse failed: {sent[:60]!r} — {exc2}")
+                    words = sent.split()
+                    results.append(
+                        {
+                            "tokens": words,
+                            "edges_src": [],
+                            "edges_dst": [],
+                            "deprels": [],
+                            "pos_tags": [],
+                            "num_tokens": max(len(words), 1),
+                            "sentence": sent,
+                            "parse_error": str(exc2),
+                        }
+                    )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
@@ -124,6 +134,7 @@ def parse_corpus(
     chunk_size: int,
     num_workers: int,
     use_gpu: bool,
+    batch_size: int = 64,
 ) -> None:
     # ---- Load sentences ----
     logger.info(f"Loading sentences from {input_file}")
@@ -136,7 +147,7 @@ def parse_corpus(
 
     # ---- Build chunk tasks, skipping already-completed chunks ----
     output_dir.mkdir(parents=True, exist_ok=True)
-    tasks: list[tuple[list[str], Path]] = []
+    tasks: list[tuple[list[str], Path, int]] = []
     total_chunks = (len(sentences) + chunk_size - 1) // chunk_size
 
     for chunk_idx in range(total_chunks):
@@ -146,7 +157,7 @@ def parse_corpus(
             continue
         start = chunk_idx * chunk_size
         end = min(start + chunk_size, len(sentences))
-        tasks.append((sentences[start:end], chunk_path))
+        tasks.append((sentences[start:end], chunk_path, batch_size))
 
     if not tasks:
         logger.info("All chunks already parsed. Nothing to do.")
@@ -257,6 +268,13 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=64,
+        metavar="N",
+        help="Sentences per Stanza call (default: 64). Higher = faster but more memory.",
+    )
+    parser.add_argument(
         "--gpu",
         action="store_true",
         help="Run Stanza on GPU (much faster when available).",
@@ -281,6 +299,7 @@ def main() -> None:
         chunk_size=args.chunk_size,
         num_workers=args.num_workers,
         use_gpu=args.gpu,
+        batch_size=args.batch_size,
     )
 
 

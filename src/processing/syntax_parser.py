@@ -81,14 +81,17 @@ class StanzaSyntaxParser:
                 - "num_tokens": number of tokens
         """
         doc = self.nlp(sentence)
+        return self._extract_parse(doc.sentences[0] if doc.sentences else None)
 
+    def _extract_parse(self, sent) -> dict[str, Any]:
+        """Extract parse result from a single Stanza sentence object."""
         tokens = []
         edges_src = []
         edges_dst = []
         deprels = []
         pos_tags = []
 
-        for sent in doc.sentences:
+        if sent is not None:
             for word in sent.words:
                 tokens.append(word.text)
                 pos_tags.append(word.upos)
@@ -115,6 +118,25 @@ class StanzaSyntaxParser:
             "pos_tags": pos_tags,
             "num_tokens": len(tokens),
         }
+
+    def parse_sentences_batch(self, sentences: list[str]) -> list[dict[str, Any]]:
+        """Parse a batch of sentences in a single Stanza call (much faster than one-by-one).
+
+        Args:
+            sentences: List of raw text sentences.
+
+        Returns:
+            List of parse result dicts, one per sentence.
+        """
+        import stanza
+
+        docs = [stanza.Document([], text=s) for s in sentences]
+        processed = self.nlp(docs)
+        results = []
+        for doc in processed:
+            sent = doc.sentences[0] if doc.sentences else None
+            results.append(self._extract_parse(sent))
+        return results
 
     @staticmethod
     def to_pyg_data(
@@ -241,6 +263,7 @@ class StanzaSyntaxParser:
         sentences: list[str],
         output_dir: str,
         chunk_size: int = 10_000,
+        batch_size: int = 64,
     ) -> None:
         """Parse a large list of sentences and cache results as .jsonl chunks.
 
@@ -252,6 +275,7 @@ class StanzaSyntaxParser:
             sentences: List of raw text sentences.
             output_dir: Directory to save parsed chunks.
             chunk_size: Number of sentences per chunk file.
+            batch_size: Number of sentences per Stanza call (higher = faster, more memory).
         """
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
@@ -259,12 +283,12 @@ class StanzaSyntaxParser:
         total = len(sentences)
         num_chunks = (total + chunk_size - 1) // chunk_size
 
-        logger.info(f"Parsing {total:,} sentences into {num_chunks} chunks (chunk_size={chunk_size:,})")
+        logger.info(f"Parsing {total:,} sentences into {num_chunks} chunks (chunk_size={chunk_size:,}, batch_size={batch_size})")
 
         for chunk_idx in range(num_chunks):
             start = chunk_idx * chunk_size
             end = min(start + chunk_size, total)
-            chunk_sentences = sentences[start:end]
+            chunk_sentences = [s.strip() for s in sentences[start:end]]
 
             chunk_file = output_path / f"parsed_{chunk_idx:05d}.jsonl"
             if chunk_file.exists():
@@ -272,30 +296,35 @@ class StanzaSyntaxParser:
                 continue
 
             results = []
-            for sent in tqdm(
-                chunk_sentences,
-                desc=f"Chunk {chunk_idx}/{num_chunks}",
-                leave=False,
-            ):
+            num_batches = (len(chunk_sentences) + batch_size - 1) // batch_size
+            for bi in tqdm(range(num_batches), desc=f"Chunk {chunk_idx}/{num_chunks}", leave=False):
+                batch = chunk_sentences[bi * batch_size : (bi + 1) * batch_size]
                 try:
-                    parse = self.parse_sentence(sent.strip())
-                    parse["sentence"] = sent.strip()
-                    results.append(parse)
+                    parses = self.parse_sentences_batch(batch)
+                    for sent, parse in zip(batch, parses):
+                        parse["sentence"] = sent
+                        results.append(parse)
                 except Exception as e:
-                    logger.warning(f"Failed to parse: {sent[:80]}... — {e}")
-                    # Store a fallback: single node, no edges
-                    results.append(
-                        {
-                            "tokens": sent.strip().split(),
-                            "edges_src": [],
-                            "edges_dst": [],
-                            "deprels": [],
-                            "pos_tags": [],
-                            "num_tokens": len(sent.strip().split()),
-                            "sentence": sent.strip(),
-                            "parse_error": str(e),
-                        }
-                    )
+                    logger.warning(f"Batch failed, falling back to one-by-one: {e}")
+                    for sent in batch:
+                        try:
+                            parse = self.parse_sentence(sent)
+                            parse["sentence"] = sent
+                            results.append(parse)
+                        except Exception as e2:
+                            logger.warning(f"Failed to parse: {sent[:80]}... — {e2}")
+                            results.append(
+                                {
+                                    "tokens": sent.split(),
+                                    "edges_src": [],
+                                    "edges_dst": [],
+                                    "deprels": [],
+                                    "pos_tags": [],
+                                    "num_tokens": len(sent.split()),
+                                    "sentence": sent,
+                                    "parse_error": str(e2),
+                                }
+                            )
 
             with open(chunk_file, "w", encoding="utf-8") as f:
                 for r in results:
@@ -343,6 +372,12 @@ def main() -> None:
         help="Maximum number of sentences to parse (default: all)",
     )
     parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=64,
+        help="Sentences per Stanza call (default: 64). Higher = faster but more memory.",
+    )
+    parser.add_argument(
         "--gpu",
         action="store_true",
         help="Use GPU for Stanza parsing",
@@ -371,7 +406,7 @@ def main() -> None:
 
     # Parse
     syntax_parser = StanzaSyntaxParser(use_gpu=args.gpu)
-    syntax_parser.batch_parse(sentences, args.output, chunk_size=args.chunk_size)
+    syntax_parser.batch_parse(sentences, args.output, chunk_size=args.chunk_size, batch_size=args.batch_size)
 
 
 if __name__ == "__main__":

@@ -312,7 +312,7 @@ class SyntaxBertModel(nn.Module):
             )
             pooler_output = self.bert.pooler(flat_attention_mask, bert_outputs)
             pooler_output = pooler_output.view(bs, num_sent, -1)
-            if getattr(self.bert, "pooler_type", "") == "cls":
+            if getattr(getattr(self.bert, "model_args", None), "pooler_type", "") == "cls":
                 pooler_output = self.bert.mlp(pooler_output)
         else:
             # Plain BertModel: call it directly

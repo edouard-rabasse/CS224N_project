@@ -75,7 +75,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--pooler",
         type=str,
-        choices=["cls", "avg", "avg_top2", "avg_first_last"],
+        choices=["cls", "cls_before_pooler", "avg", "avg_top2", "avg_first_last"],
         default="cls",
         help="Pooling strategy used when --baseline is set (ignored for SyntaxBertModel).",
     )
@@ -260,6 +260,8 @@ def _apply_pooler(outputs, attention_mask: torch.Tensor, pooler: str) -> torch.T
     last_hidden = outputs.last_hidden_state
     if pooler == "cls":
         return outputs.pooler_output
+    elif pooler == "cls_before_pooler":
+        return last_hidden[:, 0]
     elif pooler == "avg":
         return (last_hidden * attention_mask.unsqueeze(-1)).sum(1) / attention_mask.sum(-1, keepdim=True)
     elif pooler in ("avg_top2", "avg_first_last"):
