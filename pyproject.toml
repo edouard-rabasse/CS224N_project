@@ -26,6 +26,7 @@ dependencies = [
     "accelerate>=1.1.0",
     "prettytable>=3.17.0",
     "simcse",
+    "matplotlib>=3.10.8",
 ]
 
 [project.optional-dependencies]
