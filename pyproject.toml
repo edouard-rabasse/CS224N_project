@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Transferring Syntactic Structure into Sentence Embeddings using GNNs — CS224N Project"
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.14"
 authors = [
     { name = "CS224N Project Team" },
 ]

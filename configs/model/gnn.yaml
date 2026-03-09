@@ -3,11 +3,12 @@
 # =============================================================================
 # Controls the graph neural network that encodes syntactic dependency trees.
 
-conv_type: gat          # gat | gcn — graph convolution layer type
+conv_type: gat          # gat | gcn | gt — graph convolution layer type
 num_layers: 2           # number of message-passing layers
 hidden_dim: 768         # must match BERT hidden size for node feature input
-heads: 4                # number of attention heads (GAT only, ignored for GCN)
+heads: 4                # number of attention heads (GAT / GT only, ignored for GCN)
 dropout: 0.1            # dropout after each conv layer
 pooling: mean           # mean | max | cls_node — graph-level readout
 add_reverse_edges: true # make dependency edges bidirectional
 freeze: false           # freeze GNN parameters (used by stop_grad strategy)
+gt_beta: true           # GT only: gated skip connection inside each TransformerConv layer

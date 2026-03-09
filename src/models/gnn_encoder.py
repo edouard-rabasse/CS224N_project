@@ -2,14 +2,14 @@
 gnn_encoder.py — Syntax-aware Graph Neural Network Encoder
 
 Encodes dependency parse trees into fixed-size sentence embeddings using
-graph convolution layers (GAT or GCN) from PyTorch Geometric.
+graph convolution layers (GAT, GCN, or Graph Transformer) from PyTorch Geometric.
 
 Node features are BERT token embeddings aligned to the syntactic parser's
 word-level tokenization. Edges represent syntactic dependency arcs.
 
 Architecture:
     Input: PyG Batch with x = (total_nodes, hidden_dim), edge_index = (2, total_edges)
-    → N layers of GATConv or GCNConv with ReLU + Dropout
+    → N layers of GATConv, GCNConv, or TransformerConv with ReLU + Dropout
     → Graph-level readout (mean / max / cls_node pooling)
     Output: h_G = (batch_size, hidden_dim)
 """
@@ -21,7 +21,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 from torch_geometric.data import Batch
-from torch_geometric.nn import GATConv, GCNConv, global_max_pool, global_mean_pool
+from torch_geometric.nn import GATConv, GCNConv, TransformerConv, global_max_pool, global_mean_pool
 
 
 class SyntaxGNNEncoder(nn.Module):
@@ -31,13 +31,14 @@ class SyntaxGNNEncoder(nn.Module):
         in_dim: Input feature dimension (must match BERT hidden size, typically 768).
         hidden_dim: Hidden dimension of GNN layers.
         num_layers: Number of message-passing layers.
-        conv_type: Type of graph convolution — "gat" or "gcn".
-        heads: Number of attention heads for GAT (ignored if conv_type="gcn").
+        conv_type: Type of graph convolution — "gat", "gcn", or "gt" (Graph Transformer).
+        heads: Number of attention heads for GAT / GT (ignored if conv_type="gcn").
         dropout: Dropout probability after each layer.
         pooling: Graph-level readout strategy — "mean", "max", or "cls_node".
+        gt_beta: Enable gated skip connection inside each TransformerConv layer (GT only).
     """
 
-    VALID_CONV_TYPES = ("gat", "gcn")
+    VALID_CONV_TYPES = ("gat", "gcn", "gt")
     VALID_POOLING = ("mean", "max", "cls_node")
 
     def __init__(
@@ -49,6 +50,7 @@ class SyntaxGNNEncoder(nn.Module):
         heads: int = 4,
         dropout: float = 0.1,
         pooling: str = "mean",
+        gt_beta: bool = True,
     ) -> None:
         super().__init__()
 
@@ -81,6 +83,21 @@ class SyntaxGNNEncoder(nn.Module):
                     dropout=dropout,
                     add_self_loops=True,
                 )
+            elif conv_type == "gt":
+                # Graph Transformer: full Q/K/V attention over graph neighbourhoods.
+                # Each head outputs hidden_dim // heads features, concat → hidden_dim.
+                # beta=True enables a learned gating between the skip connection and
+                # the aggregated neighbourhood, analogous to a transformer residual.
+                head_dim = hidden_dim // heads
+                conv = TransformerConv(
+                    in_channels=layer_in,
+                    out_channels=head_dim,
+                    heads=heads,
+                    concat=True,
+                    beta=gt_beta,
+                    dropout=dropout,
+                    edge_dim=None,
+                )
             else:
                 # GCN: simple degree-normalized convolution
                 conv = GCNConv(
@@ -112,9 +129,13 @@ class SyntaxGNNEncoder(nn.Module):
         edge_index = batch.edge_index
         batch_vec = batch.batch
 
+        # Multi-head conv types concatenate heads → output size is out_channels * heads
+        _multi_head = self.conv_type in ("gat", "gt")
+
         # Message passing layers
-        for i, (conv, norm) in enumerate(zip(self.convs, self.norms)):
-            x_res = x if x.size(-1) == conv.out_channels * (conv.heads if self.conv_type == "gat" else 1) else None
+        for conv, norm in zip(self.convs, self.norms):
+            expected_out = conv.out_channels * (conv.heads if _multi_head else 1)
+            x_res = x if x.size(-1) == expected_out else None
             x = conv(x, edge_index)
             x = norm(x)
             x = F.relu(x)
