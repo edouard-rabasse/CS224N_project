@@ -102,6 +102,7 @@ class SyntaxBertModel(nn.Module):
             heads=gnn_config.get("heads", 4),
             dropout=gnn_config.get("dropout", 0.1),
             pooling=gnn_config.get("pooling", "mean"),
+            gt_beta=gnn_config.get("gt_beta", True),
         )
 
         # ---- Projection heads for alignment ----
