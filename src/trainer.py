@@ -166,10 +166,17 @@ class SyntaxCLTrainer(Trainer):
         )
         # Enable edge-dropout augmentation only when L_GNN is active
         edge_drop = 0.1 if align_cfg.get("mu_gnn", 0.0) > 0 else 0.0
+
+        # Syntax augmentation for contrastive view 2 (Axe A)
+        syntax_aug = align_cfg.get("syntax_augmentation", None)
+        if syntax_aug:
+            logger.info(f"Syntax augmentation enabled: strategy='{syntax_aug}'")
+
         collator = SyntaxGraphCollator(
             tokenizer=tokenizer,
             max_seq_length=data_args.max_seq_length,
             edge_drop_rate=edge_drop,
+            syntax_augmentation=syntax_aug if syntax_aug else None,
         )
 
         # ---- Phase callbacks ----

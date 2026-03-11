@@ -94,6 +94,7 @@ class SyntaxBertModel(nn.Module):
         self._is_simcse = hasattr(bert_model, "bert") and hasattr(bert_model, "pooler")
 
         # ---- GNN Branch ----
+        self.use_independent_gnn_embeddings = gnn_config.get("use_independent_embeddings", False)
         self.gnn = SyntaxGNNEncoder(
             in_dim=self.hidden_dim,
             hidden_dim=gnn_config.get("hidden_dim", self.hidden_dim),
@@ -103,7 +104,14 @@ class SyntaxBertModel(nn.Module):
             dropout=gnn_config.get("dropout", 0.1),
             pooling=gnn_config.get("pooling", "mean"),
             gt_beta=gnn_config.get("gt_beta", True),
+            use_independent_embeddings=self.use_independent_gnn_embeddings,
         )
+
+        # Warm-start GNN embeddings from BERT's word embedding table
+        if self.use_independent_gnn_embeddings:
+            inner_bert = getattr(bert_model, "bert", bert_model)
+            if hasattr(inner_bert, "embeddings") and hasattr(inner_bert.embeddings, "word_embeddings"):
+                self.gnn.init_from_bert_embeddings(inner_bert.embeddings.word_embeddings)
 
         # ---- Projection heads for alignment ----
         proj_dim = alignment_config.get("projector_dim", 0)
@@ -352,7 +360,11 @@ class SyntaxBertModel(nn.Module):
         last_hidden_v1 = last_hidden_flat[0::num_sent]     # (bs, seq_len, D) — view 1
 
         gnn_input = last_hidden_v1.detach() if self.detach_bert_for_gnn else last_hidden_v1
-        h_gnn = self._compute_gnn_embeddings(gnn_input, graph_batch, token_to_word_maps)
+
+        # Extract view-1 input_ids for independent GNN embeddings (Axe B)
+        input_ids_v1 = flat_input_ids[0::num_sent] if self.use_independent_gnn_embeddings else None
+
+        h_gnn = self._compute_gnn_embeddings(gnn_input, graph_batch, token_to_word_maps, input_ids_v1=input_ids_v1)
 
         # Stop-gradient on GNN branch if configured
         if self.stop_grad_gnn:
@@ -376,20 +388,47 @@ class SyntaxBertModel(nn.Module):
         bert_hidden: Tensor,
         graph_batch: Batch,
         token_to_word_maps: Optional[list[list[int]]],
+        input_ids_v1: Optional[Tensor] = None,
     ) -> Tensor:
         """Extract per-word BERT features, set as GNN node features, and encode.
 
-        If ``token_to_word_maps`` is provided, aggregates subword embeddings by
-        mean-pooling per word. Otherwise, assumes ``graph_batch.x`` is already set.
+        If ``use_independent_gnn_embeddings`` is True and ``input_ids_v1`` is
+        provided, uses the GNN's own embedding table (Axe B) instead of
+        BERT hidden states.
+
+        Otherwise, if ``token_to_word_maps`` is provided, aggregates subword
+        embeddings by mean-pooling per word. Otherwise, assumes
+        ``graph_batch.x`` is already set.
 
         Args:
             bert_hidden: ``(bs, seq_len, hidden_dim)`` — BERT last hidden states (view 1).
             graph_batch: PyG ``Batch`` with ``edge_index`` and ``batch`` vectors.
             token_to_word_maps: Subword → word alignment maps (length = bs).
+            input_ids_v1: ``(bs, seq_len)`` — view-1 input token IDs (for Axe B).
 
         Returns:
             h_G: ``(bs, hidden_dim)`` — graph-level embeddings.
         """
+        # ---- Axe B: independent GNN embeddings ----
+        if self.use_independent_gnn_embeddings and input_ids_v1 is not None and token_to_word_maps is not None:
+            node_features_list = []
+            ptr = graph_batch.ptr
+            for i, word_map in enumerate(token_to_word_maps):
+                num_words = max(int((ptr[i + 1] - ptr[i]).item()), 1)
+                # For each word, pick the first subword's token ID
+                word_token_ids = torch.zeros(num_words, dtype=torch.long, device=input_ids_v1.device)
+                word_seen = torch.zeros(num_words, dtype=torch.bool, device=input_ids_v1.device)
+                for subword_idx, word_idx in enumerate(word_map):
+                    if 0 <= word_idx < num_words and not word_seen[word_idx]:
+                        word_token_ids[word_idx] = input_ids_v1[i, subword_idx]
+                        word_seen[word_idx] = True
+                node_features_list.append(
+                    self.gnn.compute_independent_features(word_token_ids)
+                )
+            graph_batch.x = torch.cat(node_features_list, dim=0)
+            return self.gnn(graph_batch)
+
+        # ---- Default: BERT hidden states as node features ----
         if token_to_word_maps is not None:
             node_features_list = []
             # graph_batch.ptr is the cumulative node-count array [0, n0, n0+n1, ...]
@@ -503,6 +542,10 @@ class SyntaxBertModel(nn.Module):
             "freeze_gnn": self.freeze_gnn,
             "has_bert_projector": self.bert_projector is not None,
             "has_gnn_projector": self.gnn_projector is not None,
+            "use_independent_embeddings": self.use_independent_gnn_embeddings,
+            "conv_type": self.gnn.conv_type,
+            "num_layers": self.gnn.num_layers,
+            "pooling": self.gnn.pooling,
         }
         with open(out / "model_config.json", "w") as f:
             json.dump(cfg, f, indent=2)
@@ -571,14 +614,26 @@ class SyntaxBertModel(nn.Module):
         else:
             raise FileNotFoundError(f"bert_weights/ not found in {ckpt}")
 
-        # Reconstruct GNN config from saved hidden dim
+        # Peek at GNN state dict to detect flags not stored in old model_config.json
+        _gnn_state: dict = {}
+        _gnn_state_keys: set = set()
+        if gnn_path.exists():
+            _gnn_state = torch.load(gnn_path, map_location="cpu", weights_only=True)
+            _gnn_state_keys = set(_gnn_state.get("gnn", {}).keys())
+
+        # Reconstruct GNN config from saved parameters
+        use_indep = saved_cfg.get(
+            "use_independent_embeddings",
+            "word_embeddings.weight" in _gnn_state_keys,  # back-compat: infer from state dict
+        )
         gnn_config: dict = {
-            "conv_type": "gat",       # defaults — overridden by loaded weights
-            "num_layers": 2,
+            "conv_type": saved_cfg.get("conv_type", "gat"),
+            "num_layers": saved_cfg.get("num_layers", 2),
             "hidden_dim": hidden_dim,
             "heads": 4,
             "dropout": 0.1,
-            "pooling": "mean",
+            "pooling": saved_cfg.get("pooling", "mean"),
+            "use_independent_embeddings": use_indep,
         }
         proj_dim = hidden_dim // 3 if saved_cfg.get("has_bert_projector", False) else 0
         alignment_config: dict = {
@@ -594,7 +649,7 @@ class SyntaxBertModel(nn.Module):
 
         # Restore GNN + projector weights
         if gnn_path.exists():
-            gnn_state = torch.load(gnn_path, map_location="cpu", weights_only=True)
+            gnn_state = _gnn_state if _gnn_state_keys else torch.load(gnn_path, map_location="cpu", weights_only=True)
             model.gnn.load_state_dict(gnn_state["gnn"])
             if "bert_projector" in gnn_state and model.bert_projector is not None:
                 model.bert_projector.load_state_dict(gnn_state["bert_projector"])

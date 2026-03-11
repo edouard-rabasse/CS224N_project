@@ -36,6 +36,10 @@ class SyntaxGNNEncoder(nn.Module):
         dropout: Dropout probability after each layer.
         pooling: Graph-level readout strategy — "mean", "max", or "cls_node".
         gt_beta: Enable gated skip connection inside each TransformerConv layer (GT only).
+        use_independent_embeddings: If True, the GNN uses its own word embedding
+            table instead of receiving BERT hidden states as node features.
+            This decouples the GNN input from BERT, making alignment non-trivial.
+        vocab_size: Vocabulary size for independent embeddings (default: BERT vocab).
     """
 
     VALID_CONV_TYPES = ("gat", "gcn", "gt")
@@ -51,6 +55,8 @@ class SyntaxGNNEncoder(nn.Module):
         dropout: float = 0.1,
         pooling: str = "mean",
         gt_beta: bool = True,
+        use_independent_embeddings: bool = False,
+        vocab_size: int = 30522,
     ) -> None:
         super().__init__()
 
@@ -112,6 +118,48 @@ class SyntaxGNNEncoder(nn.Module):
 
         # Output projection to ensure consistent output dimension
         self.out_proj = nn.Linear(hidden_dim, hidden_dim)
+
+        # ---- Independent word embeddings (Axe B) ----
+        self.use_independent_embeddings = use_independent_embeddings
+        if use_independent_embeddings:
+            self.word_embeddings = nn.Embedding(vocab_size, in_dim)
+            # Small projection to allow the embedding space to diverge from BERT
+            self.embed_layer_norm = nn.LayerNorm(in_dim)
+
+    def init_from_bert_embeddings(self, bert_word_embeddings: nn.Embedding) -> None:
+        """Warm-start the independent embedding table from BERT's word embeddings.
+
+        This gives the GNN a meaningful starting point instead of random features,
+        while allowing the embeddings to diverge during training.
+
+        Args:
+            bert_word_embeddings: BERT's ``word_embeddings`` layer.
+        """
+        if not self.use_independent_embeddings:
+            return
+        with torch.no_grad():
+            # Copy BERT weights; handle size mismatch gracefully
+            src_weight = bert_word_embeddings.weight
+            tgt_weight = self.word_embeddings.weight
+            n = min(src_weight.size(0), tgt_weight.size(0))
+            d = min(src_weight.size(1), tgt_weight.size(1))
+            tgt_weight[:n, :d] = src_weight[:n, :d]
+
+    def compute_independent_features(
+        self,
+        word_token_ids: Tensor,
+    ) -> Tensor:
+        """Compute node features from the GNN's own embedding table.
+
+        Args:
+            word_token_ids: (total_nodes,) — BERT vocab token IDs for each word node.
+
+        Returns:
+            Node feature tensor of shape (total_nodes, in_dim).
+        """
+        x = self.word_embeddings(word_token_ids)
+        x = self.embed_layer_norm(x)
+        return x
 
     def forward(self, batch: Batch) -> Tensor:
         """Encode a batch of dependency graphs into sentence embeddings.

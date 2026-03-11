@@ -74,7 +74,8 @@ class SyntaxGraphCollator:
     For each batch of sentences this collator:
 
     1. Tokenises sentences and stacks to ``(batch_size, 2, seq_len)``
-       (same tokens repeated twice so SimCSE's dropout masks create two views).
+       (same tokens repeated twice so SimCSE's dropout masks create two views,
+       **or** syntax-augmented view 2 when ``syntax_augmentation`` is set).
     2. Converts each parse result to a PyG ``Data`` object and forms a
        ``Batch`` for the whole batch.
     3. Computes BERT-subword → Stanza-word alignment maps used to aggregate
@@ -88,6 +89,11 @@ class SyntaxGraphCollator:
         edge_drop_rate: Fraction of edges randomly dropped for GNN augmentation.
             Set to 0.0 to disable augmented views (saves compute when
             ``mu_gnn == 0``).
+        syntax_augmentation: Augmentation strategy for view 2.  One of
+            ``"subtree_crop"``, ``"dep_reorder"``, ``"leaf_deletion"``, or
+            ``None`` (default — same-sentence dropout, standard SimCSE).
+        aug_kwargs: Extra keyword arguments forwarded to the augmentation
+            function (e.g. ``{"min_tokens": 3}`` for subtree_crop).
     """
 
     def __init__(
@@ -95,10 +101,14 @@ class SyntaxGraphCollator:
         tokenizer,
         max_seq_length: int = 32,
         edge_drop_rate: float = 0.1,
+        syntax_augmentation: str | None = None,
+        aug_kwargs: dict | None = None,
     ) -> None:
         self.tokenizer = tokenizer
         self.max_seq_length = max_seq_length
         self.edge_drop_rate = edge_drop_rate
+        self.syntax_augmentation = syntax_augmentation
+        self.aug_kwargs = aug_kwargs or {}
 
     def __call__(self, batch_items: list[dict[str, Any]]) -> dict[str, Any]:
         """Collate a list of dataset items into a model-ready batch.
@@ -118,25 +128,47 @@ class SyntaxGraphCollator:
         sentences = [item["sentence"] for item in batch_items]
         parse_results = [item["parse_result"] for item in batch_items]
 
-        # ---- Tokenise ------------------------------------------------
-        encoded = self.tokenizer(
+        # ---- Tokenise view 1 (original sentences) --------------------
+        encoded_v1 = self.tokenizer(
             sentences,
             padding="max_length",
             truncation=True,
             max_length=self.max_seq_length,
             return_tensors="pt",
         )
-        input_ids: torch.Tensor = encoded["input_ids"]      # (bs, seq_len)
-        attention_mask: torch.Tensor = encoded["attention_mask"]  # (bs, seq_len)
+        input_ids_v1: torch.Tensor = encoded_v1["input_ids"]        # (bs, seq_len)
+        attention_mask_v1: torch.Tensor = encoded_v1["attention_mask"]
 
-        # SimCSE expects (bs, 2, seq_len) — same input, different dropout views
-        input_ids_2x = torch.stack([input_ids, input_ids], dim=1)          # (bs, 2, seq_len)
-        attention_mask_2x = torch.stack([attention_mask, attention_mask], dim=1)
+        # ---- Tokenise view 2 (augmented or same) --------------------
+        if self.syntax_augmentation is not None:
+            from src.data.syntax_augmentation import augment_sentence
+
+            sentences_v2 = [
+                augment_sentence(p, strategy=self.syntax_augmentation, **self.aug_kwargs)
+                for p in parse_results
+            ]
+            encoded_v2 = self.tokenizer(
+                sentences_v2,
+                padding="max_length",
+                truncation=True,
+                max_length=self.max_seq_length,
+                return_tensors="pt",
+            )
+            input_ids_v2 = encoded_v2["input_ids"]
+            attention_mask_v2 = encoded_v2["attention_mask"]
+        else:
+            # Standard SimCSE: same input, different dropout views
+            input_ids_v2 = input_ids_v1
+            attention_mask_v2 = attention_mask_v1
+
+        # SimCSE format: (bs, 2, seq_len)
+        input_ids_2x = torch.stack([input_ids_v1, input_ids_v2], dim=1)      # (bs, 2, seq_len)
+        attention_mask_2x = torch.stack([attention_mask_v1, attention_mask_v2], dim=1)
 
         # ---- Subword → word alignment maps ---------------------------
         token_to_word_maps: list[list[int]] = []
         for i, parse in enumerate(parse_results):
-            bert_tokens = self.tokenizer.convert_ids_to_tokens(input_ids[i].tolist())
+            bert_tokens = self.tokenizer.convert_ids_to_tokens(input_ids_v1[i].tolist())
             stanza_tokens = parse.get("tokens", [])
             alignment = StanzaSyntaxParser.align_subwords(stanza_tokens, bert_tokens)
             token_to_word_maps.append(alignment)
