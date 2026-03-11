@@ -1,0 +1,36 @@
+# @package _global_
+# =============================================================================
+# Experiment: Freeze-then-Align with Graph Transformer GNN
+# =============================================================================
+# Strategy:
+#   Phase 1 (warmup): Train GNN only (BERT frozen) so the GT learns to encode
+#     syntactic structure into meaningful graph embeddings.
+#   Phase 2 (alignment): Unfreeze BERT, train jointly with alignment loss so
+#     BERT internalizes the syntactic signal from the now-competent GT.
+#
+# Loss Phase 1: L = L_GNN   (BERT frozen, GT learning)
+# Loss Phase 2: L = L_SimCSE + λ * L_align + μ * L_GNN
+#
+# Usage:  uv run python src/train.py experiment=gt_freeze_then_align
+
+experiment_name: gt_freeze_then_align
+
+training:
+  # Phase 1: GNN warmup
+  phase1_epochs: 1
+  phase1_lr: 1.0e-3
+  phase1_freeze_bert: true
+  # Phase 2: Joint alignment
+  phase2_epochs: 1
+  phase2_lr: 3.0e-5
+  phase2_freeze_bert: false
+  num_train_epochs: 2     # total = phase1 + phase2
+
+model:
+  gnn:
+    conv_type: gt
+    freeze: false
+  alignment:
+    lambda_align: 0.05
+    mu_gnn: 0.01
+    stop_grad_gnn: false
